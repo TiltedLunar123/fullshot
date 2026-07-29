@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Northwind Analytics</title>
+    <style>
+      /*
+        A realistic looking page used only for store screenshots and the promo
+        video. It deliberately has the features that make capture hard: a sticky
+        header, a fixed help bubble, lazily loaded images and a long body.
+      */
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+
+      body {
+        font: 16px/1.6 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        color: #0f172a;
+        background: #ffffff;
+      }
+
+      .nav {
+        position: sticky;
+        top: 0;
+        z-index: 40;
+        display: flex;
+        align-items: center;
+        gap: 28px;
+        padding: 16px 48px;
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(8px);
+        border-bottom: 1px solid #e2e8f0;
+      }
+      .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; }
+      .logo .dot { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(180deg, #9f1239, #e11d48); }
+      .nav a { color: #475569; text-decoration: none; font-size: 14.5px; font-weight: 500; }
+      .nav .spacer { margin-left: auto; }
+      .nav .cta { padding: 8px 16px; color: #fff; background: #e11d48; border-radius: 8px; font-weight: 600; }
+
+      .help {
+        position: fixed;
+        right: 28px;
+        bottom: 28px;
+        z-index: 50;
+        padding: 12px 18px;
+        color: #fff;
+        background: #0f172a;
+        border-radius: 999px;
+        font-size: 14px;
+        font-weight: 600;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.25);
+      }
+
+      .hero { padding: 84px 48px 64px; max-width: 900px; }
+      .eyebrow { color: #e11d48; font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
+      h1 { margin: 14px 0 18px; font-size: 52px; line-height: 1.1; letter-spacing: -0.025em; }
+      .lede { font-size: 19px; color: #475569; max-width: 640px; }
+
+      .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; padding: 0 48px 56px; }
+      .stat { padding: 22px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; }
+      .stat b { display: block; font-size: 30px; letter-spacing: -0.02em; }
+      .stat span { color: #64748b; font-size: 13.5px; }
+
+      section { padding: 0 48px 60px; }
+      h2 { font-size: 28px; letter-spacing: -0.02em; margin-bottom: 8px; }
+      .sub { color: #64748b; margin-bottom: 26px; }
+
+      .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+      .card { border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; }
+      .card img { display: block; width: 100%; height: 150px; object-fit: cover; background: #e2e8f0; }
+      .card .body { padding: 18px; }
+      .card h3 { font-size: 16.5px; margin-bottom: 6px; }
+      .card p { color: #64748b; font-size: 14px; }
+
+      table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+      th, td { text-align: left; padding: 13px 14px; border-bottom: 1px solid #e2e8f0; }
+      th { color: #64748b; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.05em; }
+      .pill { padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
+      .ok { background: #dcfce7; color: #166534; }
+      .warn { background: #fef3c7; color: #92400e; }
+
+      .quote { padding: 44px 48px; margin: 0 48px 60px; background: #fff1f2; border-left: 4px solid #e11d48; border-radius: 12px; }
+      .quote p { font-size: 20px; line-height: 1.5; }
+      .quote cite { display: block; margin-top: 14px; color: #64748b; font-size: 14px; font-style: normal; }
+
+      footer { padding: 40px 48px 70px; background: #0f172a; color: #94a3b8; font-size: 14px; }
+      footer strong { color: #fff; display: block; margin-bottom: 8px; }
+    </style>
+  </head>
+  <body>
+    <nav class="nav">
+      <span class="logo"><span class="dot"></span> Northwind</span>
+      <a href="#">Product</a><a href="#">Pricing</a><a href="#">Docs</a><a href="#">Customers</a>
+      <span class="spacer"></span>
+      <a class="cta" href="#">Start free</a>
+    </nav>
+
+    <div class="help">Need a hand?</div>
+
+    <header class="hero">
+      <p class="eyebrow">Quarterly review</p>
+      <h1>Every number your team argued about, in one place.</h1>
+      <p class="lede">
+        Northwind pulls your warehouse, billing and support data into a single
+        view, so the weekly meeting starts with the same set of facts.
+      </p>
+    </header>
+
+    <div class="stats">
+      <div class="stat"><b>18,402</b><span>Active accounts</span></div>
+      <div class="stat"><b>$1.24M</b><span>Recurring revenue</span></div>
+      <div class="stat"><b>3.1%</b><span>Monthly churn</span></div>
+      <div class="stat"><b>412</b><span>Open tickets</span></div>
+    </div>
+
+    <section>
+      <h2>What shipped this quarter</h2>
+      <p class="sub">Three of the changes customers asked for most often.</p>
+      <div class="cards" id="cards"></div>
+    </section>
+
+    <section>
+      <h2>Regional breakdown</h2>
+      <p class="sub">Revenue and retention by territory.</p>
+      <table>
+        <thead>
+          <tr><th>Region</th><th>Accounts</th><th>Revenue</th><th>Retention</th><th>Status</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </section>
+
+    <blockquote class="quote">
+      <p>
+        We used to spend the first twenty minutes of every review arguing about
+        whose spreadsheet was right. Now we just open the dashboard.
+      </p>
+      <cite>Operations lead, mid-market logistics</cite>
+    </blockquote>
+
+    <footer>
+      <strong>Northwind Analytics</strong>
+      A sample page. Not a real company, and not affiliated with anyone.
+    </footer>
+
+    <script>
+      const swatches = ['#e11d48', '#9f1239', '#334155'];
+      const cards = [
+        ['Live warehouse sync', 'Changes land in under a minute instead of overnight.'],
+        ['Shared saved views', 'Send a link rather than a screenshot of a screenshot.'],
+        ['Anomaly alerts', 'Get told when a number moves before the meeting does.'],
+      ];
+      document.getElementById('cards').innerHTML = cards
+        .map(
+          ([title, body], i) => `
+        <article class="card">
+          <img loading="lazy" alt="" src="data:image/svg+xml;utf8,${encodeURIComponent(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="150">
+               <rect width="400" height="150" fill="${swatches[i]}" opacity="0.12"/>
+               <circle cx="${90 + i * 60}" cy="75" r="46" fill="${swatches[i]}" opacity="0.5"/>
+               <rect x="220" y="52" width="130" height="12" rx="6" fill="${swatches[i]}" opacity="0.4"/>
+               <rect x="220" y="80" width="90" height="12" rx="6" fill="${swatches[i]}" opacity="0.25"/>
+             </svg>`
+          )}" />
+          <div class="body"><h3>${title}</h3><p>${body}</p></div>
+        </article>`
+        )
+        .join('');
+
+      const regions = [
+        ['North America', '7,204', '$612,400', '94%', 'ok', 'Healthy'],
+        ['United Kingdom', '2,918', '$241,900', '91%', 'ok', 'Healthy'],
+        ['Germany', '2,140', '$188,300', '88%', 'warn', 'Watch'],
+        ['Nordics', '1,662', '$121,700', '93%', 'ok', 'Healthy'],
+        ['Benelux', '1,431', '$ 96,200', '86%', 'warn', 'Watch'],
+        ['Iberia', '1,208', '$ 74,900', '90%', 'ok', 'Healthy'],
+        ['Australia', '1,839', '$142,600', '92%', 'ok', 'Healthy'],
+      ];
+      document.getElementById('rows').innerHTML = regions
+        .map(
+          ([r, a, rev, ret, cls, label]) =>
+            `<tr><td>${r}</td><td>${a}</td><td>${rev}</td><td>${ret}</td>
+             <td><span class="pill ${cls}">${label}</span></td></tr>`
+        )
+        .join('');
+    </script>
+  </body>
+</html>

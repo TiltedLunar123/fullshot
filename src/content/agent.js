@@ -433,7 +433,14 @@
     // Sticky and fixed are classified AFTER priming, because priming can add
     // banners and reveal chrome that did not exist at load.
     session.floating = collectFloating();
-    for (const el of session.floating.sticky) el.setAttribute(STICKY_ATTR, '');
+
+    // "Leave them alone" has to mean exactly that. Converting sticky elements
+    // to static regardless of the setting would contradict the option's own
+    // label, and would leave no way to capture a page the naive way on purpose.
+    // Visible-area capture never needs it either, being a single photograph.
+    if (settings.floatingPolicy !== 'keep' && mode !== 'visible') {
+      for (const el of session.floating.sticky) el.setAttribute(STICKY_ATTR, '');
+    }
 
     if (document.fonts?.ready) {
       await Promise.race([document.fonts.ready, sleep(1200)]);
