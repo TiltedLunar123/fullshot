@@ -360,6 +360,11 @@
   /* ---------------------------------------------------------------- */
 
   function startText(event) {
+    // Without this the browser moves focus on mouse-up, which immediately
+    // blurs the input being opened here and commits an empty shape before the
+    // user has typed a single character.
+    event.preventDefault();
+
     const point = toImage(event);
     const rect = canvas.getBoundingClientRect();
     const wrapRect = wrap.getBoundingClientRect();
@@ -374,11 +379,21 @@
     textInput.hidden = false;
     textInput.focus();
 
-    const commit = () => {
-      const text = textInput.value.trim();
+    // Setting `hidden` below itself fires a blur, which would re-enter commit
+    // and push the same text twice. One flag closes both paths.
+    let finished = false;
+
+    const teardown = () => {
+      finished = true;
       textInput.hidden = true;
       textInput.removeEventListener('blur', commit);
       textInput.removeEventListener('keydown', onKey);
+    };
+
+    const commit = () => {
+      if (finished) return;
+      const text = textInput.value.trim();
+      teardown();
       if (!text) return;
       snapshot();
       state.shapes.push({
@@ -393,16 +408,21 @@
       });
       render();
     };
+
     const onKey = (e) => {
+      // Keep typing contained: the editor's single-key tool shortcuts must not
+      // fire while the user is writing a label.
+      e.stopPropagation();
       if (e.key === 'Enter') commit();
-      if (e.key === 'Escape') {
-        textInput.hidden = true;
-        textInput.removeEventListener('blur', commit);
-        textInput.removeEventListener('keydown', onKey);
-      }
+      if (e.key === 'Escape') teardown();
     };
-    textInput.addEventListener('blur', commit);
+
     textInput.addEventListener('keydown', onKey);
+    // Attach blur only after the current input sequence has settled, so the
+    // focus churn from this very click cannot commit an empty shape.
+    requestAnimationFrame(() => {
+      if (!finished) textInput.addEventListener('blur', commit);
+    });
   }
 
   /* ---------------------------------------------------------------- */

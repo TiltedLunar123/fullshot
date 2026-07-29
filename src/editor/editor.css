@@ -5,7 +5,7 @@
   --muted: #64748b;
   --line: #e2e8f0;
   --hover: #f1f5f9;
-  --accent: #4f46e5;
+  --accent: #e11d48;
   --accent-fg: #ffffff;
   --warn-bg: #fffbeb;
   --warn-line: #fde68a;
@@ -21,7 +21,7 @@
     --muted: #94a3b8;
     --line: #1e293b;
     --hover: #1e293b;
-    --accent: #6366f1;
+    --accent: #fb7185;
     --warn-bg: #27200a;
     --warn-line: #713f12;
     --warn-fg: #fde68a;
@@ -188,7 +188,7 @@ canvas {
 .crop-overlay {
   position: absolute;
   border: 2px dashed var(--accent);
-  background: rgba(79, 70, 229, 0.14);
+  background: rgba(225, 29, 72, 0.14);
   pointer-events: none;
 }
 

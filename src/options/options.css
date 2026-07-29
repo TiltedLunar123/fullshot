@@ -5,7 +5,7 @@
   --muted: #64748b;
   --line: #e2e8f0;
   --hover: #f1f5f9;
-  --accent: #4f46e5;
+  --accent: #e11d48;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -16,7 +16,7 @@
     --muted: #94a3b8;
     --line: #1e293b;
     --hover: #1e293b;
-    --accent: #818cf8;
+    --accent: #fb7185;
   }
 }
 

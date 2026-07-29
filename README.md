@@ -111,18 +111,29 @@ npm run build      # dist/chrome and dist/firefox
 npm test           # unit tests for the capture geometry and PDF writer
 npm run check      # release gate: permissions, icons, no remote code, no network
 npm run zip        # store-ready zips in release/
-npm run all        # icons, build, zip, gate and tests
+npm run all        # build, zip, gate and tests
+npm run icons      # re-rasterise the icon PNGs (only after editing icon.svg)
 ```
 
-`node tools/e2e.mjs` loads the built extension into a real browser, captures
-`test-pages/torture.html`, and verifies the result pixel by pixel. The fixture encodes
-each block's index in its own red channel, so a misplaced, duplicated or dropped slice
-shows up as the wrong colour at a known height instead of a screenshot that merely
-looks plausible. It checks that the sticky header appears exactly once, that the fixed
-footer is not repeated, and that all twenty blocks landed at the correct offset.
+There are two end-to-end harnesses, both driving a real browser with no test framework.
 
-> Branded Google Chrome now refuses `--load-extension`, so the harness drives Edge or
+`npm run e2e` loads the built extension, captures `test-pages/torture.html`, and
+verifies the result pixel by pixel. The fixture encodes each block's index in its own
+red channel, so a misplaced, duplicated or dropped slice shows up as the wrong colour
+at a known height instead of a screenshot that merely looks plausible. It checks that
+the sticky header appears exactly once, that the fixed footer is not repeated, and that
+all twenty blocks landed at the correct offset.
+
+`npm run e2e:tools` drives every editor tool with real synthesised mouse and keyboard
+input and asserts on the resulting canvas: that Move changes nothing, that Box draws a
+hollow outline, that Arrow's head is a solid filled triangle, that Text commits exactly
+once whether you press Enter or click away, that Redact is genuinely opaque black, that
+Blur destroys fine detail without blanking the region, that Crop resizes correctly and
+leaves annotations anchored to the image, and that Undo reverses it.
+
+> Branded Google Chrome now refuses `--load-extension`, so the harnesses drive Edge or
 > Chromium. Same engine, same result.
+
 
 ## How it is put together
 
@@ -134,6 +145,7 @@ src/
   lib/scheduler.js     quota-adaptive capture pacing
   lib/canvas-budget.js runtime canvas limit probing
   lib/pdf.js           dependency-free multi-page PDF writer
+  lib/enhance.js       unsharp mask and contrast curve for text legibility
   editor/              preview, annotation, export
 ```
 

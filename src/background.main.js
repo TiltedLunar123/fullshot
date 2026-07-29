@@ -280,7 +280,7 @@ async function stitchByScrolling({ tabId, windowId, metrics, fit, ctx, scheduler
 async function setBadge(tabId, text) {
   try {
     await FS.api.action.setBadgeText({ tabId, text });
-    if (text) await FS.api.action.setBadgeBackgroundColor({ tabId, color: '#4f46e5' });
+    if (text) await FS.api.action.setBadgeBackgroundColor({ tabId, color: '#e11d48' });
   } catch {
     /* badge is decorative; never fail a capture over it */
   }

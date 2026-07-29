@@ -237,7 +237,7 @@
         .label { font-weight: 600; }
         .count { color: #64748b; font-variant-numeric: tabular-nums; }
         .track { height: 5px; background: #e2e8f0; border-radius: 999px; margin: 9px 0 10px; overflow: hidden; }
-        .bar { height: 100%; width: 0%; background: #4f46e5; border-radius: 999px; transition: width .18s ease; }
+        .bar { height: 100%; width: 0%; background: #e11d48; border-radius: 999px; transition: width .18s ease; }
         button {
           width: 100%; font: inherit; font-weight: 600; color: #475569;
           background: #f1f5f9; border: 0; border-radius: 8px;
@@ -310,8 +310,8 @@
         position: 'fixed',
         zIndex: '2147483646',
         pointerEvents: 'none',
-        border: '2px solid #4f46e5',
-        background: 'rgba(79, 70, 229, .12)',
+        border: '2px solid #e11d48',
+        background: 'rgba(225, 29, 72, .12)',
         borderRadius: '3px',
         transition: 'all .05s linear',
         display: 'none',

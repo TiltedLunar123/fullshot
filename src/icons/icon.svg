@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Fullshot">
   <defs>
     <linearGradient id="fs-bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#6366f1"/>
-      <stop offset="1" stop-color="#8b5cf6"/>
+      <stop offset="0" stop-color="#9f1239"/>
+      <stop offset="1" stop-color="#e11d48"/>
     </linearGradient>
   </defs>
 

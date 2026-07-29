@@ -17,177 +17,22 @@
  *   node tools/e2e.mjs
  */
 
-import { spawn } from 'node:child_process';
-import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  CDP,
+  buildTestVariant,
+  httpJson,
+  launch,
+  shutdown,
+  waitFor,
+} from './cdp.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 9333;
 
-/**
- * Edge comes first on purpose.
- *
- * Branded Google Chrome now refuses --load-extension and --disable-extensions-except
- * ("--disable-extensions-except is not allowed in Google Chrome, ignoring." in its
- * own log), so the extension silently never loads there. Edge and Chromium are the
- * same engine and still honour the flag, so they are what the harness drives.
- */
-const CHROME_CANDIDATES = [
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files/Chromium/Application/chrome.exe',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-  // Last resort: works only on unbranded Chromium builds of Chrome.
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  '/usr/bin/google-chrome',
-];
-
-/* ------------------------------------------------------------------ */
-/* Tiny CDP client                                                     */
-/* ------------------------------------------------------------------ */
-
-function httpJson(urlPath) {
-  return new Promise((resolve, reject) => {
-    const req = http.get({ host: '127.0.0.1', port: PORT, path: urlPath }, (res) => {
-      let body = '';
-      res.on('data', (c) => (body += c));
-      res.on('end', () => {
-        try {
-          resolve(JSON.parse(body));
-        } catch (err) {
-          reject(new Error(`bad JSON from ${urlPath}: ${body.slice(0, 200)}`));
-        }
-      });
-    });
-    req.on('error', reject);
-  });
-}
-
-class CDP {
-  constructor(socket) {
-    this.socket = socket;
-    this.nextId = 1;
-    this.pending = new Map();
-    socket.addEventListener('message', (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.id && this.pending.has(msg.id)) {
-        const { resolve, reject } = this.pending.get(msg.id);
-        this.pending.delete(msg.id);
-        msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result);
-      }
-    });
-  }
-
-  static async connect(url) {
-    const socket = new WebSocket(url);
-    await new Promise((resolve, reject) => {
-      socket.addEventListener('open', resolve, { once: true });
-      socket.addEventListener('error', () => reject(new Error('CDP socket failed')), { once: true });
-    });
-    return new CDP(socket);
-  }
-
-  send(method, params = {}, sessionId) {
-    const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.socket.send(JSON.stringify({ id, method, params, sessionId }));
-    });
-  }
-
-  async attach(targetId) {
-    const { sessionId } = await this.send('Target.attachToTarget', { targetId, flatten: true });
-    return sessionId;
-  }
-
-  /** Evaluate in a target and return the value, surfacing thrown errors. */
-  async evaluate(sessionId, expression) {
-    const result = await this.send(
-      'Runtime.evaluate',
-      { expression, awaitPromise: true, returnByValue: true },
-      sessionId
-    );
-    if (result.exceptionDetails) {
-      throw new Error(
-        result.exceptionDetails.exception?.description ?? JSON.stringify(result.exceptionDetails)
-      );
-    }
-    return result.result.value;
-  }
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function waitFor(label, fn, { timeout = 30000, interval = 300 } = {}) {
-  const deadline = Date.now() + timeout;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const value = await fn();
-      if (value) return value;
-    } catch (err) {
-      lastError = err;
-    }
-    await sleep(interval);
-  }
-  throw new Error(`timed out waiting for ${label}${lastError ? `: ${lastError.message}` : ''}`);
-}
-
-/* ------------------------------------------------------------------ */
-/* Harness                                                             */
-/* ------------------------------------------------------------------ */
-
-/**
- * Chrome derives an unpacked extension's id from its `key`, so embedding a
- * generated public key makes the id predictable. Without that the harness would
- * have to guess which of the browser's several service workers is ours.
- *
- * The id is the first 16 bytes of SHA-256 over the DER public key, with each
- * nibble mapped onto a-p.
- */
-function deriveExtensionId(derPublicKey) {
-  const digest = crypto.createHash('sha256').update(derPublicKey).digest();
-  let id = '';
-  for (let i = 0; i < 16; i++) {
-    id += String.fromCharCode(97 + (digest[i] >> 4));
-    id += String.fromCharCode(97 + (digest[i] & 0x0f));
-  }
-  return id;
-}
-
-async function buildTestVariant() {
-  const from = path.join(ROOT, 'dist', 'chrome');
-  const to = path.join(ROOT, 'dist', 'e2e');
-  await fs.rm(to, { recursive: true, force: true });
-  await fs.cp(from, to, { recursive: true });
-
-  const { publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-  const der = publicKey.export({ type: 'spki', format: 'der' });
-
-  const manifestPath = path.join(to, 'manifest.json');
-  const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
-  manifest.name = 'Fullshot (E2E test build - do not ship)';
-  // Stands in for the user gesture that would grant activeTab.
-  manifest.host_permissions = ['<all_urls>'];
-  manifest.key = der.toString('base64');
-  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-
-  return { dir: to, extensionId: deriveExtensionId(der) };
-}
-
-/**
- * Serve test-pages over HTTP.
- *
- * The fixture could be loaded from disk, but extensions only reach file:// URLs
- * when the user ticks "Allow access to file URLs", so a file:// run would be
- * testing that setting rather than the capture engine.
- */
 function serveFixtures() {
   const dir = path.join(ROOT, 'test-pages');
   const server = http.createServer(async (req, res) => {
@@ -205,42 +50,7 @@ function serveFixtures() {
   });
 }
 
-async function findChrome() {
-  for (const candidate of CHROME_CANDIDATES) {
-    try {
-      await fs.access(candidate);
-      return candidate;
-    } catch {
-      /* try the next one */
-    }
-  }
-  throw new Error('No Chrome or Edge binary found.');
-}
 
-async function launch(extensionDir, { headless }) {
-  const binary = await findChrome();
-  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'fullshot-e2e-'));
-  const args = [
-    `--remote-debugging-port=${PORT}`,
-    `--user-data-dir=${profile}`,
-    `--load-extension=${extensionDir}`,
-    `--disable-extensions-except=${extensionDir}`,
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-background-timer-throttling',
-    '--window-size=1200,800',
-    'about:blank',
-  ];
-  if (headless) args.unshift('--headless=new');
-
-  const child = spawn(binary, args, { stdio: 'ignore', detached: false });
-  return { child, profile };
-}
-
-/**
- * Runs inside an extension page. Reads the stored capture, draws it, and
- * checks the geometry the fixture guarantees.
- */
 const VERIFY_SCRIPT = (id, fixture) => `(async () => {
   const record = await FS.store.get(${JSON.stringify(id)});
   if (!record) return { error: 'capture record missing' };
@@ -323,7 +133,7 @@ async function run() {
   const pass = (msg) => results.push({ ok: true, msg });
 
   console.log('building throwaway test variant...');
-  const { dir: extensionDir, extensionId } = await buildTestVariant();
+  const { dir: extensionDir, extensionId } = await buildTestVariant(ROOT, 'e2e');
   console.log(`expected extension id: ${extensionId}`);
 
   const { server: fixtureServer, port: fixturePort } = await serveFixtures();
@@ -333,8 +143,7 @@ async function run() {
   for (const headless of [true, false]) {
     try {
       console.log(`launching Chrome (${headless ? 'headless' : 'headed'})...`);
-      session = await launch(extensionDir, { headless });
-      await waitFor('devtools endpoint', () => httpJson('/json/version'), { timeout: 15000 });
+      session = await launch(extensionDir, { headless, port: PORT });
       break;
     } catch (err) {
       try {
@@ -349,7 +158,7 @@ async function run() {
   if (!session) throw new Error('Could not start Chrome with the extension loaded.');
 
   try {
-    const version = await httpJson('/json/version');
+    const version = await httpJson(PORT, '/json/version');
     const cdp = await CDP.connect(version.webSocketDebuggerUrl);
     await cdp.send('Target.setDiscoverTargets', { discover: true });
 
@@ -562,14 +371,8 @@ async function run() {
       fail(`editor produced no usable PNG (${sharpening.exportedBytes} bytes)`);
     }
   } finally {
-    try {
-      session.child.kill();
-    } catch {
-      /* already exited */
-    }
     fixtureServer.close();
-    await sleep(500);
-    await fs.rm(session.profile, { recursive: true, force: true }).catch(() => {});
+    await shutdown(session);
   }
 
   console.log('\n--- results ---');
