@@ -18,6 +18,10 @@ First release.
   and retries rather than dropping a slice.
 - Scrollbar cropped out, animations paused, parallax pinned, smooth scrolling
   and scroll-snap overridden during capture.
+- Optional text sharpening (unsharp mask plus a gentle contrast curve, at
+  three strengths) for captures that had to be scaled down. Available as a
+  default in settings and as a per-screenshot toggle in the editor. It never
+  upscales.
 - Editor with crop, redact, pixelate, arrow, box and text, plus undo and redo.
 - Export to PNG, JPEG, WebP and multi-page PDF, and copy to clipboard.
 - Warnings surfaced for cross-origin frames, mid-capture height changes and

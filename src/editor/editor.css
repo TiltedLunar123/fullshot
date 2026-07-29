@@ -275,6 +275,26 @@ canvas {
   gap: 7px;
 }
 
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.micro {
+  margin: 5px 0 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .field {
   display: flex;
   flex-direction: column;

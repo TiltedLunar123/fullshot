@@ -491,6 +491,76 @@ async function run() {
             .join(', ')
       );
     }
+    /* ---- editor ------------------------------------------------- */
+    // Opening the editor consumes the stored capture, so this runs last.
+    const { targetId: editorTarget } = await cdp.send('Target.createTarget', {
+      url: `chrome-extension://${extensionId}/editor/editor.html?id=${capture.id}`,
+    });
+    const editorSession = await cdp.attach(editorTarget);
+
+    const ready = await waitFor('editor to load the capture', async () => {
+      const state = await cdp.evaluate(
+        editorSession,
+        `(() => {
+           const wrap = document.getElementById('wrap');
+           const canvas = document.getElementById('canvas');
+           if (!wrap || wrap.hidden || !canvas.width) return null;
+           return { width: canvas.width, height: canvas.height };
+         })()`
+      );
+      return state;
+    });
+
+    if (ready.width === report.width && ready.height === report.height) {
+      pass(`editor opened the capture at full size (${ready.width} x ${ready.height})`);
+    } else {
+      fail(`editor shows ${ready.width}x${ready.height}, capture was ${report.width}x${report.height}`);
+    }
+
+    // Sharpening must measurably raise edge energy, or the toggle does nothing.
+    const sharpening = await cdp.evaluate(
+      editorSession,
+      `(async () => {
+         const canvas = document.getElementById('canvas');
+         const ctx = canvas.getContext('2d', { willReadFrequently: true });
+         // Sample a band that crosses the block edges, where text-like
+         // transitions live.
+         const band = () => {
+           const d = ctx.getImageData(0, 0, canvas.width, Math.min(600, canvas.height)).data;
+           let energy = 0;
+           for (let i = 0; i < d.length - 4; i += 4) energy += Math.abs(d[i] - d[i + 4]);
+           return energy;
+         };
+         const before = band();
+
+         const toggle = document.getElementById('enhance');
+         document.getElementById('enhance-level').value = 'strong';
+         toggle.checked = true;
+         toggle.dispatchEvent(new Event('change'));
+
+         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+         await new Promise((r) => setTimeout(r, 400));
+         const after = band();
+
+         // Also confirm the editor can still encode an image afterwards.
+         const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+         return { before, after, exportedBytes: blob ? blob.size : 0 };
+       })()`
+    );
+
+    if (sharpening.after > sharpening.before) {
+      pass(
+        `sharpen raised edge definition (${sharpening.before} to ${sharpening.after})`
+      );
+    } else {
+      fail(`sharpen did not increase edge definition (${sharpening.before} to ${sharpening.after})`);
+    }
+
+    if (sharpening.exportedBytes > 1000) {
+      pass(`editor exported a PNG (${Math.round(sharpening.exportedBytes / 1024)} KB)`);
+    } else {
+      fail(`editor produced no usable PNG (${sharpening.exportedBytes} bytes)`);
+    }
   } finally {
     try {
       session.child.kill();

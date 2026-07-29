@@ -67,6 +67,23 @@
         <ul id="warning-list"></ul>
       </section>
 
+      <section class="legibility">
+        <h2>Legibility</h2>
+        <label class="check">
+          <input type="checkbox" id="enhance" />
+          <span>Sharpen text</span>
+        </label>
+        <p class="micro">Crisps up edges so small text reads more clearly.</p>
+        <div class="field" id="enhance-level-field" hidden>
+          <label for="enhance-level">Strength</label>
+          <select id="enhance-level">
+            <option value="subtle">Subtle</option>
+            <option value="medium">Medium</option>
+            <option value="strong">Strong</option>
+          </select>
+        </div>
+      </section>
+
       <section class="export">
         <h2>Save</h2>
 
@@ -110,6 +127,7 @@
 
     <script src="../lib/plan.js"></script>
     <script src="../lib/pdf.js"></script>
+    <script src="../lib/enhance.js"></script>
     <script src="../lib/store.js"></script>
     <script src="editor.js"></script>
   </body>

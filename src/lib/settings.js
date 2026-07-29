@@ -24,6 +24,10 @@ FS.DEFAULTS = {
   filenameTemplate: '{title} - {date}',
   /** Capture at device resolution for sharp output on HiDPI screens. */
   retina: true,
+  /** Sharpen edges so small text stays legible, especially after a downscale. */
+  enhanceText: false,
+  /** How hard to sharpen: subtle | medium | strong. */
+  enhanceLevel: 'medium',
   /** Open the editor when a capture finishes. */
   openEditor: true,
 };

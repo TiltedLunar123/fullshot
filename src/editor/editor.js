@@ -31,6 +31,40 @@
   const undoStack = [];
   const redoStack = [];
 
+  /**
+   * Sharpening is expensive on a full-page capture, so the enhanced copy is
+   * computed once and reused for every render and export until the setting
+   * changes. `base` itself is never modified, so the toggle stays reversible.
+   */
+  let enhanced = { canvas: null, level: null };
+
+  function enhanceOn() {
+    return $('#enhance').checked;
+  }
+
+  function buildEnhanced(level) {
+    const canvas = document.createElement('canvas');
+    canvas.width = base.width;
+    canvas.height = base.height;
+    const ectx = canvas.getContext('2d', { willReadFrequently: true });
+    ectx.drawImage(base, 0, 0);
+
+    const imageData = ectx.getImageData(0, 0, canvas.width, canvas.height);
+    FS.enhance.apply(imageData, level);
+    ectx.putImageData(imageData, 0, 0);
+
+    enhanced = { canvas, level };
+    return canvas;
+  }
+
+  /** The image everything draws from: the original, or its sharpened copy. */
+  function source() {
+    if (!enhanceOn()) return base;
+    const level = $('#enhance-level').value;
+    if (enhanced.canvas && enhanced.level === level) return enhanced.canvas;
+    return buildEnhanced(level);
+  }
+
   /* ---------------------------------------------------------------- */
   /* Rendering                                                         */
   /* ---------------------------------------------------------------- */
@@ -46,7 +80,7 @@
       canvas.height = c.h;
     }
     ctx.clearRect(0, 0, c.w, c.h);
-    ctx.drawImage(base, c.x, c.y, c.w, c.h, 0, 0, c.w, c.h);
+    ctx.drawImage(source(), c.x, c.y, c.w, c.h, 0, 0, c.w, c.h);
     for (const shape of state.shapes) drawShape(ctx, shape, c);
     updateMeta();
   }
@@ -110,7 +144,17 @@
     tmp.width = smallW;
     tmp.height = smallH;
     const tctx = tmp.getContext('2d');
-    tctx.drawImage(base, Math.min(shape.x, shape.x + shape.w), Math.min(shape.y, shape.y + shape.h), w, h, 0, 0, smallW, smallH);
+    tctx.drawImage(
+      source(),
+      Math.min(shape.x, shape.x + shape.w),
+      Math.min(shape.y, shape.y + shape.h),
+      w,
+      h,
+      0,
+      0,
+      smallW,
+      smallH
+    );
 
     target.imageSmoothingEnabled = false;
     target.drawImage(
@@ -386,7 +430,7 @@
     out.width = c.w;
     out.height = c.h;
     const octx = out.getContext('2d');
-    octx.drawImage(base, c.x, c.y, c.w, c.h, 0, 0, c.w, c.h);
+    octx.drawImage(source(), c.x, c.y, c.w, c.h, 0, 0, c.w, c.h);
     for (const shape of state.shapes) drawShape(octx, shape, c);
     return out;
   }
@@ -567,6 +611,9 @@
     $('#format').value = settings.format ?? 'png';
     $('#quality').value = settings.jpegQuality ?? 92;
     $('#quality-out').value = $('#quality').value;
+    $('#enhance').checked = Boolean(settings.enhanceText);
+    $('#enhance-level').value = settings.enhanceLevel ?? 'medium';
+    $('#enhance-level-field').hidden = !settings.enhanceText;
     $('#filename').value = FS.plan.filename(settings.filenameTemplate ?? '{title} - {date}', {
       title: record.title,
       url: record.url,
@@ -607,6 +654,26 @@
   $('#save').addEventListener('click', save);
   $('#copy').addEventListener('click', copyToClipboard);
   $('#format').addEventListener('change', syncFormatFields);
+
+  function applyEnhanceSetting() {
+    const on = enhanceOn();
+    $('#enhance-level-field').hidden = !on;
+
+    if (on && FS.enhance.isExpensive(base.width, base.height)) {
+      setHint('Sharpening a capture this large takes a moment...');
+    }
+    // Yield a frame so the hint paints before the synchronous filter runs.
+    requestAnimationFrame(() => {
+      render();
+      setHint(on ? 'Text sharpening on.' : '');
+    });
+  }
+
+  $('#enhance').addEventListener('change', applyEnhanceSetting);
+  $('#enhance-level').addEventListener('change', () => {
+    enhanced = { canvas: null, level: null };
+    applyEnhanceSetting();
+  });
   $('#quality').addEventListener('input', () => {
     $('#quality-out').value = $('#quality').value;
   });

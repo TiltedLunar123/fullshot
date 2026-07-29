@@ -15,11 +15,13 @@
     jpegQuality: 92,
     filenameTemplate: '{title} - {date}',
     retina: true,
+    enhanceText: false,
+    enhanceLevel: 'medium',
     openEditor: true,
   };
 
-  const CHECKBOXES = ['primeLazyContent', 'freezeMotion', 'retina', 'openEditor'];
-  const SELECTS = ['floatingPolicy', 'format'];
+  const CHECKBOXES = ['primeLazyContent', 'freezeMotion', 'retina', 'enhanceText', 'openEditor'];
+  const SELECTS = ['floatingPolicy', 'format', 'enhanceLevel'];
   const TEXTS = ['filenameTemplate'];
   const RANGES = ['settleMs'];
 

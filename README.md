@@ -51,6 +51,16 @@ are overridden so programmatic scrolling lands exactly where it is told.
 a page that changed height mid-capture, or a downscale applied to fit a canvas limit
 are all reported rather than quietly baked into the image.
 
+## Text legibility
+
+Long pages sometimes have to be scaled down to fit within your browser's maximum image
+size, and that is exactly when small text starts to smear. Turn on **Sharpen text**, in
+settings or per screenshot in the editor, and Fullshot applies an unsharp mask with a
+gentle contrast curve at one of three strengths.
+
+It sharpens what was captured; it never upscales or invents pixels, because that makes
+text look worse and would misrepresent what was actually on screen.
+
 ## Editor, included
 
 Crop, black out, pixelate, arrows, boxes and text, with undo and redo. Export PNG,
