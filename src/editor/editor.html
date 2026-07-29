@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fullshot</title>
+    <link rel="stylesheet" href="editor.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <div class="brand">
+        <img src="../icons/icon-32.png" width="22" height="22" alt="" />
+        <span>Fullshot</span>
+      </div>
+
+      <div class="tools" role="toolbar" aria-label="Editing tools">
+        <button class="tool is-active" data-tool="move" title="Move and pan (V)"><span>Move</span></button>
+        <button class="tool" data-tool="crop" title="Crop (C)"><span>Crop</span></button>
+        <button class="tool" data-tool="box" title="Rectangle (R)"><span>Box</span></button>
+        <button class="tool" data-tool="arrow" title="Arrow (A)"><span>Arrow</span></button>
+        <button class="tool" data-tool="text" title="Text (T)"><span>Text</span></button>
+        <button class="tool" data-tool="redact" title="Black out (B)"><span>Redact</span></button>
+        <button class="tool" data-tool="pixelate" title="Pixelate (P)"><span>Blur</span></button>
+      </div>
+
+      <div class="tool-options">
+        <label class="swatches" aria-label="Colour">
+          <input type="color" id="color" value="#ef4444" />
+        </label>
+        <label class="stroke">
+          Size
+          <input type="range" id="stroke" min="2" max="24" value="5" />
+        </label>
+      </div>
+
+      <div class="history">
+        <button class="ghost" id="undo" title="Undo (Ctrl+Z)">Undo</button>
+        <button class="ghost" id="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+      </div>
+    </header>
+
+    <div class="crop-bar" hidden>
+      <span>Drag on the image to choose an area.</span>
+      <button class="primary sm" id="crop-apply">Apply crop</button>
+      <button class="ghost sm" id="crop-cancel">Cancel</button>
+    </div>
+
+    <main class="stage">
+      <div class="loading" id="loading">Loading your screenshot...</div>
+      <div class="canvas-wrap" id="wrap" hidden>
+        <canvas id="canvas"></canvas>
+        <div class="crop-overlay" id="crop-overlay" hidden></div>
+        <input class="text-input" id="text-input" hidden />
+      </div>
+    </main>
+
+    <aside class="panel">
+      <section class="meta">
+        <h2>Screenshot</h2>
+        <dl>
+          <div><dt>Size</dt><dd id="dims">-</dd></div>
+          <div><dt>Page</dt><dd id="page-title" class="ellipsis">-</dd></div>
+        </dl>
+      </section>
+
+      <section class="warnings" id="warnings" hidden>
+        <h2>Worth knowing</h2>
+        <ul id="warning-list"></ul>
+      </section>
+
+      <section class="export">
+        <h2>Save</h2>
+
+        <div class="field">
+          <label for="format">Format</label>
+          <select id="format">
+            <option value="png">PNG - sharpest, largest file</option>
+            <option value="jpeg">JPEG - smaller file</option>
+            <option value="webp">WebP - smallest file</option>
+            <option value="pdf">PDF - paginated document</option>
+          </select>
+        </div>
+
+        <div class="field" id="quality-field" hidden>
+          <label for="quality">Quality <output id="quality-out">92</output></label>
+          <input type="range" id="quality" min="40" max="100" value="92" />
+        </div>
+
+        <div class="field" id="paper-field" hidden>
+          <label for="paper">Paper size</label>
+          <select id="paper">
+            <option value="a4">A4</option>
+            <option value="letter">Letter</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="filename">File name</label>
+          <input type="text" id="filename" spellcheck="false" />
+        </div>
+
+        <button class="primary" id="save">Save</button>
+        <button class="secondary" id="copy">Copy to clipboard</button>
+        <p class="hint" id="hint"></p>
+      </section>
+
+      <footer class="panel-foot">
+        <span>Nothing here is uploaded anywhere.</span>
+      </footer>
+    </aside>
+
+    <script src="../lib/plan.js"></script>
+    <script src="../lib/pdf.js"></script>
+    <script src="../lib/store.js"></script>
+    <script src="editor.js"></script>
+  </body>
+</html>

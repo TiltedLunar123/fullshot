@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Fullshot - Full Page Screenshot",
+  "version": "1.0.0",
+  "description": "One-click full page screenshots that get sticky headers, lazy images and app UIs right. Free editor and PDF export. No account.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "action": {
+    "default_title": "Fullshot - capture this page",
+    "default_popup": "popup/popup.html"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "commands": {
+    "capture-full-page": {
+      "suggested_key": { "default": "Alt+Shift+S" },
+      "description": "Capture the full page"
+    },
+    "capture-visible": {
+      "suggested_key": { "default": "Alt+Shift+V" },
+      "description": "Capture the visible area"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png",
+    "128": "icons/icon-128.png"
+  }
+}

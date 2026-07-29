@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fullshot settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="../icons/icon-48.png" width="34" height="34" alt="" />
+        <div>
+          <h1>Fullshot settings</h1>
+          <p class="sub">Everything is stored in your browser. Nothing is sent anywhere.</p>
+        </div>
+      </header>
+
+      <section>
+        <h2>Capture</h2>
+
+        <div class="row">
+          <div class="text">
+            <label for="floatingPolicy">Sticky headers and floating bars</label>
+            <p>
+              Menus and cookie bars that follow you down the page would otherwise be
+              repeated in every screen of the image.
+            </p>
+          </div>
+          <select id="floatingPolicy">
+            <option value="once">Show once (recommended)</option>
+            <option value="never">Hide completely</option>
+            <option value="keep">Leave them alone</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <div class="text">
+            <label for="primeLazyContent">Load images before capturing</label>
+            <p>Scrolls the page first so images that load on demand are not blank.</p>
+          </div>
+          <input type="checkbox" id="primeLazyContent" />
+        </div>
+
+        <div class="row">
+          <div class="text">
+            <label for="freezeMotion">Pause animations</label>
+            <p>Stops moving content from tearing between the stitched sections.</p>
+          </div>
+          <input type="checkbox" id="freezeMotion" />
+        </div>
+
+        <div class="row">
+          <div class="text">
+            <label for="retina">Capture at full screen resolution</label>
+            <p>Sharper on high-resolution displays, at the cost of a larger file.</p>
+          </div>
+          <input type="checkbox" id="retina" />
+        </div>
+
+        <div class="row">
+          <div class="text">
+            <label for="settleMs">Pause before each section <output id="settleMs-out"></output></label>
+            <p>Increase this if a slow page captures before it has finished drawing.</p>
+          </div>
+          <input type="range" id="settleMs" min="0" max="800" step="20" />
+        </div>
+      </section>
+
+      <section>
+        <h2>Saving</h2>
+
+        <div class="row">
+          <div class="text">
+            <label for="format">Default format</label>
+          </div>
+          <select id="format">
+            <option value="png">PNG</option>
+            <option value="jpeg">JPEG</option>
+            <option value="webp">WebP</option>
+            <option value="pdf">PDF</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <div class="text">
+            <label for="filenameTemplate">File name</label>
+            <p>Available: <code>{title}</code> <code>{host}</code> <code>{date}</code> <code>{time}</code></p>
+          </div>
+          <input type="text" id="filenameTemplate" spellcheck="false" />
+        </div>
+
+        <div class="row">
+          <div class="text">
+            <label for="openEditor">Open the editor after capturing</label>
+            <p>Turn this off to capture without leaving the page.</p>
+          </div>
+          <input type="checkbox" id="openEditor" />
+        </div>
+      </section>
+
+      <section>
+        <h2>Keyboard shortcuts</h2>
+        <p class="note" id="shortcut-note">
+          Full page is <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> and visible area is
+          <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>. You can change these on your
+          browser's extension shortcuts page.
+        </p>
+      </section>
+
+      <footer>
+        <button class="ghost" id="reset">Reset to defaults</button>
+        <span class="saved" id="saved" role="status" aria-live="polite"></span>
+      </footer>
+    </main>
+
+    <script src="options.js"></script>
+  </body>
+</html>

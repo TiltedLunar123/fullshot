@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Fullshot">
+  <defs>
+    <linearGradient id="fs-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded tile. Kept simple so the mark survives being drawn at 16px. -->
+  <rect width="128" height="128" rx="28" ry="28" fill="url(#fs-bg)"/>
+
+  <!-- Top and bottom rails read as "the whole page, edge to edge". -->
+  <rect x="33" y="23" width="62" height="12" rx="6" fill="#ffffff"/>
+  <rect x="33" y="93" width="62" height="12" rx="6" fill="#ffffff"/>
+
+  <!--
+    Downward arrow: capture travelling from the top of the page to the end.
+    The head is deliberately large relative to the shaft. At 16px the whole
+    tile is an 8x downscale, and a slender shaft with a small head collapses
+    into an "I" shape; letting the head dominate keeps the direction readable.
+  -->
+  <rect x="57" y="40" width="14" height="22" rx="7" fill="#ffffff"/>
+  <path d="M64 87 L41 59 H87 Z" fill="#ffffff"/>
+</svg>

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fullshot torture page</title>
+    <style>
+      /*
+        A deliberately hostile fixture. Every feature here corresponds to a
+        real-world failure mode of scroll-and-stitch capture.
+
+        The block colours encode their own index in the red channel
+        (block i has red = i * 10), so a stitched capture can be verified
+        pixel-by-pixel: if any slice is misplaced, duplicated or dropped, the
+        colour found at a given height will not match the block that belongs
+        there.
+      */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html {
+        /* Fights programmatic scrolling: the agent must override this. */
+        scroll-behavior: smooth;
+      }
+
+      body {
+        font: 15px system-ui, sans-serif;
+        /* Parallax: shifts per slice unless forced back to `scroll`. */
+        background-image: linear-gradient(45deg, #1e293b 25%, #334155 25%);
+        background-attachment: fixed;
+        background-size: 40px 40px;
+      }
+
+      /* Sticky header: must appear exactly ONCE in the final image. */
+      #sticky-header {
+        position: sticky;
+        top: 0;
+        height: 60px;
+        background: #ff00ff;
+        color: #fff;
+        display: flex;
+        align-items: center;
+        padding: 0 20px;
+        font-weight: 700;
+        z-index: 10;
+      }
+
+      /* Fixed footer: viewport furniture, must appear at most once. */
+      #fixed-footer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 40px;
+        background: #00ffff;
+        color: #000;
+        display: flex;
+        align-items: center;
+        padding: 0 20px;
+        z-index: 20;
+      }
+
+      /* Fixed cookie banner, the classic repeated-in-every-slice offender. */
+      #cookie-banner {
+        position: fixed;
+        top: 90px;
+        right: 20px;
+        width: 240px;
+        padding: 14px;
+        background: #facc15;
+        color: #000;
+        border-radius: 10px;
+        z-index: 30;
+      }
+
+      #blocks {
+        /* Scroll-snap: lands programmatic scrolls on the wrong offset. */
+        scroll-snap-type: y mandatory;
+      }
+
+      .block {
+        height: 200px;
+        scroll-snap-align: start;
+        display: flex;
+        align-items: center;
+        padding-left: 24px;
+        font-size: 22px;
+        font-weight: 700;
+        color: #fff;
+        /* An animation that would tear between slices if not frozen. */
+        animation: drift 1.2s linear infinite alternate;
+      }
+
+      @keyframes drift {
+        from {
+          padding-left: 24px;
+        }
+        to {
+          padding-left: 90px;
+        }
+      }
+
+      .lazy-img {
+        width: 120px;
+        height: 80px;
+        margin-left: auto;
+        margin-right: 24px;
+        background: #0f172a;
+      }
+
+      /* An inner scrolling pane, as used by mail and chat apps. */
+      #inner-pane {
+        height: 240px;
+        overflow-y: auto;
+        background: #020617;
+        color: #e2e8f0;
+        border: 4px solid #64748b;
+      }
+
+      #inner-pane .row {
+        height: 60px;
+        display: flex;
+        align-items: center;
+        padding-left: 16px;
+        border-bottom: 1px solid #1e293b;
+      }
+    </style>
+  </head>
+  <body>
+    <header id="sticky-header">Sticky header - must appear exactly once</header>
+
+    <div id="cookie-banner">We use cookies. This is fixed and should not repeat.</div>
+
+    <main id="blocks"></main>
+
+    <section id="inner-pane" aria-label="Inner scrolling pane"></section>
+
+    <footer id="fixed-footer">Fixed footer - viewport furniture</footer>
+
+    <script>
+      // 20 blocks of 200px. Block i is rgb(i*10, 100, 200), so the red channel
+      // is a direct index. The verifier reads it back out of the stitched PNG.
+      const BLOCK_COUNT = 20;
+      const BLOCK_HEIGHT = 200;
+      const blocks = document.getElementById('blocks');
+
+      for (let i = 0; i < BLOCK_COUNT; i++) {
+        const el = document.createElement('div');
+        el.className = 'block';
+        el.dataset.index = String(i);
+        el.style.background = `rgb(${i * 10}, 100, 200)`;
+        el.textContent = `Block ${i}`;
+
+        // Lazily-loaded images: blank bands unless the agent primes them.
+        const img = document.createElement('img');
+        img.className = 'lazy-img';
+        img.loading = 'lazy';
+        img.alt = '';
+        // Inline SVG, so the fixture needs no network and no external files.
+        img.src =
+          'data:image/svg+xml;utf8,' +
+          encodeURIComponent(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80">
+               <rect width="120" height="80" fill="#0f172a"/>
+               <text x="60" y="46" font-size="20" fill="#38bdf8"
+                     text-anchor="middle" font-family="sans-serif">${i}</text>
+             </svg>`
+          );
+        el.append(img);
+        blocks.append(el);
+      }
+
+      const pane = document.getElementById('inner-pane');
+      for (let i = 0; i < 30; i++) {
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.textContent = `Inner pane row ${i}`;
+        pane.append(row);
+      }
+
+      // Expose the fixture's geometry so the verifier does not have to guess.
+      window.__torture = {
+        blockCount: BLOCK_COUNT,
+        blockHeight: BLOCK_HEIGHT,
+        headerHeight: 60,
+        get blocksTop() {
+          return document.getElementById('blocks').getBoundingClientRect().top + window.scrollY;
+        },
+      };
+    </script>
+  </body>
+</html>
