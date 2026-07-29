@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fullshot hostile scroll fixture</title>
+    <style>
+      /*
+        A page that resists being scrolled back to the top.
+
+        Real pages do this in several ways: scroll anchoring moving the page
+        when content above the viewport loads, scroll handlers that reposition,
+        and single page apps that restore a saved offset. All of them share one
+        symptom, which is that a single window.scrollTo is silently undone.
+
+        The blocks encode their index in the red channel (i * 10), exactly like
+        torture.html, so a capture that started from the wrong offset shows the
+        wrong colour at a known height.
+      */
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font: 16px system-ui, sans-serif; }
+      .block {
+        height: 200px;
+        display: flex;
+        align-items: center;
+        padding-left: 24px;
+        font-size: 22px;
+        font-weight: 700;
+        color: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="blocks"></main>
+
+    <script>
+      const BLOCK_COUNT = 20;
+      const BLOCK_HEIGHT = 200;
+      const blocks = document.getElementById('blocks');
+      for (let i = 0; i < BLOCK_COUNT; i++) {
+        const el = document.createElement('div');
+        el.className = 'block';
+        el.dataset.index = String(i);
+        el.style.background = `rgb(${i * 10}, 100, 200)`;
+        el.textContent = `Block ${i}`;
+        blocks.append(el);
+      }
+
+      // Undo the first N attempts to reach the top, then relent. A single
+      // unverified scrollTo loses to this outright; a verified retry wins.
+      const params = new URLSearchParams(location.search);
+      let remaining = Number(params.get('fight') ?? 2);
+      let yanks = 0;
+
+      window.addEventListener(
+        'scroll',
+        () => {
+          if (remaining > 0 && window.scrollY < 60) {
+            remaining--;
+            yanks++;
+            window.scrollTo(0, 2400);
+          }
+        },
+        { passive: true }
+      );
+
+      window.__hostile = {
+        blockCount: BLOCK_COUNT,
+        blockHeight: BLOCK_HEIGHT,
+        get yanks() {
+          return yanks;
+        },
+        get remaining() {
+          return remaining;
+        },
+      };
+    </script>
+  </body>
+</html>

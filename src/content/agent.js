@@ -86,6 +86,11 @@
          scroll-snap-type: none !important; scroll-snap-align: none !important; }`,
       // Parallax backgrounds shift with the viewport and smear across slices.
       `* { background-attachment: scroll !important; }`,
+      // Scroll anchoring silently moves the page to keep content visually
+      // stable when something above the viewport changes size. Priming lazy
+      // images does exactly that, so anchoring can undo a scroll back to the
+      // top and leave the capture starting from wherever the user already was.
+      `html, body, * { overflow-anchor: none !important; }`,
       // Sticky elements belong in the image once, in their natural position.
       `[${STICKY_ATTR}] { position: static !important; }`,
       `[${HIDE_ATTR}] { visibility: hidden !important; }`,
@@ -169,6 +174,50 @@
   }
 
   /**
+   * Scroll the window and CHECK that it landed.
+   *
+   * window.scrollTo is a request, not a guarantee. A page can ignore it, undo
+   * it from a scroll handler, or move the page afterwards through scroll
+   * anchoring. Nothing here used to verify the result, so a page that refused
+   * to go back to the top produced a capture that started from wherever the
+   * user already was, with the part above it left blank.
+   *
+   * Landing short at the end of the document is normal clamping, not failure,
+   * so it is not retried. Callers still place slices by the MEASURED offset,
+   * which is what keeps a partial move from corrupting the image.
+   */
+  async function scrollWindowTo(x, y) {
+    const scroller = document.scrollingElement || document.documentElement;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      window.scrollTo(x, y);
+
+      // Some pages leave window.scrollTo inert but honour the scrolling
+      // element directly, so try that before giving up on this attempt.
+      if (Math.abs(window.scrollY - y) > 1 && scroller) {
+        try {
+          scroller.scrollTop = y;
+          scroller.scrollLeft = x;
+        } catch {
+          /* not scrollable, nothing more to try */
+        }
+      }
+      await nextFrame();
+
+      const offBy = Math.abs(window.scrollY - y);
+      if (offBy <= 1) return true;
+
+      // Asking to go past the end lands short. That is the browser clamping,
+      // and it is expected on the final tile.
+      const maxScroll = Math.max(0, docHeight() - window.innerHeight);
+      if (y >= maxScroll && Math.abs(window.scrollY - maxScroll) <= 2) return true;
+
+      await sleep(40);
+    }
+    return Math.abs(window.scrollY - y) <= 1;
+  }
+
+  /**
    * Wake lazily-loaded content by sweeping the page once.
    *
    * IntersectionObserver only fires for content that has actually been near the
@@ -194,8 +243,9 @@
       await nextFrame();
       await sleep(40);
     }
-    window.scrollTo(0, 0);
-    await nextFrame();
+    // Verified, because priming is exactly when scroll anchoring fires: the
+    // images that just loaded are above the current position.
+    await scrollWindowTo(0, 0);
     await sleep(60);
   }
 
@@ -450,8 +500,12 @@
     // Visible-area capture must photograph what the user is actually looking
     // at, so moving the page first would defeat the entire mode.
     if (mode === 'full') {
-      window.scrollTo(0, 0);
-      await nextFrame();
+      const landed = await scrollWindowTo(0, 0);
+      if (!landed) {
+        warnings.push(
+          'This page would not scroll back to the top, so the capture may be missing content above where you were. Pages that take over scrolling can behave this way.'
+        );
+      }
     }
 
     const metrics = measure();
@@ -679,7 +733,7 @@
       bringPaneIntoView();
     } else if (session.mode !== 'visible') {
       // Targets arrive in output space, so shift them by the region origin.
-      window.scrollTo(session.region.x + msg.x, session.region.y + msg.y);
+      await scrollWindowTo(session.region.x + msg.x, session.region.y + msg.y);
     }
 
     await nextFrame();

@@ -153,6 +153,7 @@ async function run() {
          clientWidth: document.documentElement.clientWidth,
          clientHeight: document.documentElement.clientHeight,
          pageHeight: document.documentElement.scrollHeight,
+         blockCount: window.__torture.blockCount,
          paneRows: window.__torture.paneRows,
          paneRowHeight: window.__torture.paneRowHeight,
        }))()`
@@ -221,23 +222,70 @@ async function run() {
       await sleep(400);
     };
 
+    /* ---- full page, starting from the BOTTOM ---------------------- */
+    // Every other harness starts at the top of the page, so the "user is
+    // already scrolled down" path was never covered. Reported symptom: the
+    // capture only goes downward from wherever you are.
+    const blocksTop = await cdp.evaluate(page, `window.__torture.blocksTop`);
+    await scrollTo(geometry.pageHeight);
+    const startedAt = await cdp.evaluate(page, `window.scrollY`);
+    console.log(`scrolled to bottom: scrollY=${startedAt}`);
+
+    const fromBottom = await cdp.evaluate(sw, `FS.startCapture('full', ${tabId})`);
+    if (!fromBottom?.ok) throw new Error(`capture failed: ${fromBottom?.error}`);
+    const fbShot = await cdp.evaluate(control, INSPECT(fromBottom.id));
+    const expectedFull = Math.round(geometry.pageHeight * geometry.dpr);
+    console.log(`from bottom: ${fbShot.width}x${fbShot.height}, expected height ${expectedFull}`);
+
+    check(
+      Math.abs(fbShot.height - expectedFull) <= 6,
+      `Full capture from the bottom is the whole page (${fbShot.height}px)`,
+      `Full capture from the bottom is ${fbShot.height}px, expected ${expectedFull}px`
+    );
+
+    const fbBad = [];
+    for (let i = 0; i < geometry.blockCount; i++) {
+      const y = (blocksTop + i * 200 + 100) * geometry.dpr;
+      if (y >= fbShot.height) { fbBad.push(`#${i} missing`); continue; }
+      const [r, g, b] = await cdp.evaluate(control, SAMPLE(5, y));
+      if (!(r === i * 10 && g === 100 && b === 200)) fbBad.push(`#${i} rgb(${r},${g},${b})`);
+    }
+    check(
+      fbBad.length === 0,
+      `All ${geometry.blockCount} blocks correct when starting from the bottom`,
+      `${fbBad.length} block(s) wrong from the bottom: ${fbBad.slice(0, 5).join(', ')}`
+    );
+
     /* ---- visible ------------------------------------------------- */
     // Scroll somewhere non-trivial so a page-origin bug cannot pass by luck.
     await cdp.evaluate(page, `window.scrollTo(0, 900); true`);
     await sleep(400);
 
+    const before = await cdp.evaluate(page, `(() => ({
+      innerH: window.innerHeight,
+      clientH: document.documentElement.clientHeight,
+      innerW: window.innerWidth,
+      clientW: document.documentElement.clientWidth,
+      scrollY: window.scrollY,
+      pageH: document.documentElement.scrollHeight,
+      leftovers: document.querySelectorAll('#fullshot-overlay, #fullshot-capture-style, [data-fullshot-hide], [data-fullshot-sticky]').length,
+      htmlStyle: document.documentElement.getAttribute('style') || '',
+      bodyOverflow: getComputedStyle(document.body).overflow,
+    }))()`);
+    console.log('pre-visible state:', JSON.stringify(before));
+
     const visible = await cdp.evaluate(sw, `FS.startCapture('visible', ${tabId})`);
     if (!visible?.ok) throw new Error(`visible capture failed: ${visible?.error}`);
 
     const vShot = await cdp.evaluate(control, INSPECT(visible.id));
-    const expectedVW = Math.round(usableW * geometry.dpr);
-    const expectedVH = Math.round(usableH * geometry.dpr);
+    const expectedVW = Math.round(before.clientW * geometry.dpr);
+    const expectedVH = Math.round(before.clientH * geometry.dpr);
     console.log(`visible: ${vShot.width}x${vShot.height}, expected ~${expectedVW}x${expectedVH}`);
 
     check(
       Math.abs(vShot.height - expectedVH) <= 4,
-      `Visible capture is viewport height (${vShot.height}px, not the ${Math.round(geometry.pageHeight * geometry.dpr)}px page)`,
-      `Visible capture is ${vShot.height}px but the viewport is ${expectedVH}px (page is ${Math.round(geometry.pageHeight * geometry.dpr)}px)`
+      `Visible capture is viewport height (${vShot.height}px, not the ${Math.round(before.pageH * geometry.dpr)}px page)`,
+      `Visible capture is ${vShot.height}px but the viewport is ${expectedVH}px (page is ${Math.round(before.pageH * geometry.dpr)}px)`
     );
     check(
       Math.abs(vShot.width - expectedVW) <= 4,
@@ -248,7 +296,7 @@ async function run() {
     // Aspect ratio is the direct test for stretching: a viewport-shaped image
     // squeezed onto a page-shaped canvas would be wildly taller than wide.
     const vAspect = vShot.width / vShot.height;
-    const trueAspect = usableW / usableH;
+    const trueAspect = before.clientW / before.clientH;
     check(
       Math.abs(vAspect - trueAspect) < 0.02,
       `Visible capture is not stretched (aspect ${vAspect.toFixed(3)} vs ${trueAspect.toFixed(3)})`,

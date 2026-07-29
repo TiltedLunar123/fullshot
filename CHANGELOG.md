@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.2
+
+- Fixed: starting a full page capture while scrolled down could leave the top
+  of the image blank. window.scrollTo is a request, not a guarantee, and
+  nothing verified that it landed. Since slices are placed at the MEASURED
+  offset, a page that ignored or undid the scroll produced an image filled
+  only from where the user already was, downward. Scrolling is now verified
+  and retried, and falls back to the document's scrolling element.
+- Scroll anchoring is disabled during capture. It moves the page to keep
+  content visually stable when something above the viewport changes size,
+  which is exactly what priming lazy images does, so it could undo the return
+  to the top.
+- When a page genuinely refuses to scroll back to the top, the capture now
+  says so instead of silently returning a screenshot missing its top.
+
 ## 1.0.1
 
 Fixes for the three non-full-page capture modes, and for the editor shortcuts.
