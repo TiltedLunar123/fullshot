@@ -236,32 +236,68 @@ async function main() {
     const pageShot = path.join(RAW, 'page-once.png');
     const panelW = 1080;
     const panelH = H;
-    const scrollSeconds = 8;
-    const scrollClip = path.join(tmp, 'scroll.mp4');
-    await ff(['-loop', '1', '-i', pageShot, '-t', String(scrollSeconds), '-r', String(FPS),
-      '-vf', `scale=${panelW}:-2,crop=${panelW}:${panelH}:0:'min((ih-${panelH})*t/${scrollSeconds},ih-${panelH})',setsar=1`,
-      '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', scrollClip]);
 
-    const scrollComposite = path.join(tmp, 'scroll-composite.mp4');
-    await ff(['-loop', '1', '-i', slides.stage, '-i', scrollClip,
-      '-filter_complex', `[0:v][1:v]overlay=840:0:shortest=1,setsar=1`,
-      '-t', String(scrollSeconds), '-r', String(FPS),
-      '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', scrollComposite]);
-    console.log('built scrolling capture clip');
+    /** The real capture, scrolling, for however long the narration needs. */
+    const scrollFor = async (seconds) => {
+      const scrollClip = path.join(tmp, 'scroll.mp4');
+      await ff(['-loop', '1', '-i', pageShot, '-t', String(seconds), '-r', String(FPS),
+        '-vf', `scale=${panelW}:-2,crop=${panelW}:${panelH}:0:'min((ih-${panelH})*t/${seconds},ih-${panelH})',setsar=1`,
+        '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', scrollClip]);
+
+      const out = path.join(tmp, 'scroll-composite.mp4');
+      await ff(['-loop', '1', '-i', slides.stage, '-i', scrollClip,
+        '-filter_complex', `[0:v][1:v]overlay=840:0:shortest=1,setsar=1`,
+        '-t', String(seconds), '-r', String(FPS),
+        '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', out]);
+      console.log('built scrolling capture clip');
+      return out;
+    };
+
+    /* ---- voiceover ------------------------------------------------ */
+    // Generated locally with Kokoro. Segment lengths are measured from the
+    // audio, so the visuals are cut to the narration rather than the
+    // narration being squeezed to fit arbitrary slide durations.
+    const LINES = [
+      'Fullshot takes a screenshot of an entire web page. Not just the part you can see.',
+      'One click, and it scrolls the page for you, then stitches every section into a single image.',
+      'Sticky menus appear once, where they belong, instead of being stamped in over and over.',
+      'Capture the whole page, the visible area, a single element you click, or a panel that scrolls on its own.',
+      'The editor is included. Crop, black out anything private, add arrows and text, then save as a PNG or a PDF.',
+      'It asks for three permissions, and makes no network requests at all.',
+      'Free, open source, and on GitHub.',
+    ];
+
+    const PY = 'C:/Users/hilge/.local/media-tools/Scripts/python.exe';
+    const TTS = 'C:/Users/hilge/.local/media-tools/kokoro_tts.py';
+    const voFiles = [];
+    const voSeconds = [];
+    for (let i = 0; i < LINES.length; i++) {
+      const wav = path.join(tmp, `vo${i}.wav`);
+      await run(PY, [TTS, '--text', LINES[i], '--out', wav], { maxBuffer: 1 << 26 });
+      const probe = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration',
+        '-of', 'csv=p=0', wav]);
+      const seconds = parseFloat(probe.stdout.trim());
+      voFiles.push(wav);
+      voSeconds.push(seconds);
+      console.log(`vo ${i}: ${seconds.toFixed(2)}s`);
+    }
+
+    // Leave room after each line so speech never runs into the crossfade.
+    const TAIL = 1.0;
+    const durations = voSeconds.map((s) => Math.max(3.5, s + TAIL));
 
     const clips = [
-      await still(slides.title, path.join(tmp, 'c1.mp4'), 4.5),
-      scrollComposite,
-      await still(slides.compare, path.join(tmp, 'c3.mp4'), 6),
-      await still(slides.modes, path.join(tmp, 'c4.mp4'), 5.5),
-      await still(slides.editor, path.join(tmp, 'c5.mp4'), 5.5),
-      await still(slides.privacy, path.join(tmp, 'c6.mp4'), 5),
-      await still(slides.end, path.join(tmp, 'c7.mp4'), 5),
+      await still(slides.title, path.join(tmp, 'c1.mp4'), durations[0]),
+      await scrollFor(durations[1]),
+      await still(slides.compare, path.join(tmp, 'c3.mp4'), durations[2]),
+      await still(slides.modes, path.join(tmp, 'c4.mp4'), durations[3]),
+      await still(slides.editor, path.join(tmp, 'c5.mp4'), durations[4]),
+      await still(slides.privacy, path.join(tmp, 'c6.mp4'), durations[5]),
+      await still(slides.end, path.join(tmp, 'c7.mp4'), durations[6]),
     ];
     console.log('built all clips');
 
     /* ---- crossfade into one timeline ------------------------------ */
-    const durations = [4.5, scrollSeconds, 6, 5.5, 5.5, 5, 5];
     const FADE = 0.6;
 
     const inputs = clips.flatMap((c) => ['-i', c]);
@@ -281,11 +317,44 @@ async function main() {
       '-c:v', 'libx264', '-preset', 'slow', '-crf', '19', '-pix_fmt', 'yuv420p',
       '-r', String(FPS), silent]);
 
-    // A silent AAC track: some players and uploaders behave oddly without one.
+    /* ---- narration track ------------------------------------------ */
+    // Each line is delayed to the moment its slide arrives. The crossfades
+    // shorten the timeline, so the audio cannot simply be concatenated: the
+    // offsets have to be the same ones the video was cut with.
+    const starts = [];
+    let at = 0;
+    for (let i = 0; i < durations.length; i++) {
+      starts.push(at);
+      at += durations[i] - FADE;
+    }
+
+    // A short lead-in so a line begins after its transition has settled.
+    const LEAD = 0.35;
+    const voInputs = voFiles.flatMap((f) => ['-i', f]);
+    const delays = voFiles
+      .map((_, i) => {
+        const ms = Math.round((starts[i] + LEAD) * 1000);
+        return `[${i}:a]adelay=${ms}|${ms},aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[d${i}]`;
+      })
+      .join(';');
+    const mixIn = voFiles.map((_, i) => `[d${i}]`).join('');
+    // normalize=0 keeps amix from ducking every line just because there are
+    // several inputs; they never overlap anyway. loudnorm lands it near the
+    // level YouTube expects instead of leaving it quiet.
+    const voiceFilter =
+      `${delays};${mixIn}amix=inputs=${voFiles.length}:normalize=0[mixed];` +
+      `[mixed]loudnorm=I=-16:TP=-1.5:LRA=11[aout]`;
+
+    const voice = path.join(tmp, 'voice.m4a');
+    // loudnorm resamples to 192k internally, so the output rate has to be
+    // pinned back to 48k or the track ships at an odd rate for delivery.
+    await ff([...voInputs, '-filter_complex', voiceFilter, '-map', '[aout]',
+      '-ar', '48000', '-ac', '2', '-c:a', 'aac', '-b:a', '192k', voice]);
+    console.log('built narration track');
+
     const final = path.join(OUT, 'fullshot-promo-1080p.mp4');
-    await ff(['-i', silent, '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000',
-      '-shortest', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k',
-      '-movflags', '+faststart', final]);
+    await ff(['-i', silent, '-i', voice, '-map', '0:v', '-map', '1:a',
+      '-c:v', 'copy', '-c:a', 'copy', '-movflags', '+faststart', final]);
 
     const { size } = await fs.stat(final);
     const probe = await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0',
