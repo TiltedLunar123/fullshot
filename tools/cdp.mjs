@@ -178,6 +178,30 @@ export class CDP {
       );
     }
   }
+
+  /**
+   * Press a single letter, optionally with Ctrl held.
+   * CDP modifier bits: 1 alt, 2 ctrl, 4 meta, 8 shift.
+   */
+  async pressKey(sessionId, letter, { ctrl = false, shift = false } = {}) {
+    const modifiers = (ctrl ? 2 : 0) | (shift ? 8 : 0);
+    const code = `Key${letter.toUpperCase()}`;
+    const vk = letter.toUpperCase().charCodeAt(0);
+    for (const type of ['keyDown', 'keyUp']) {
+      await this.send(
+        'Input.dispatchKeyEvent',
+        {
+          type,
+          modifiers,
+          key: shift ? letter.toUpperCase() : letter.toLowerCase(),
+          code,
+          windowsVirtualKeyCode: vk,
+          nativeVirtualKeyCode: vk,
+        },
+        sessionId
+      );
+    }
+  }
 }
 
 /**

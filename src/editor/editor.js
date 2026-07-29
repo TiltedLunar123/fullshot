@@ -699,20 +699,54 @@
   });
 
   const SHORTCUTS = { v: 'move', c: 'crop', r: 'box', a: 'arrow', t: 'text', b: 'redact', p: 'pixelate' };
+
   document.addEventListener('keydown', (event) => {
+    // Never steal keys from a field the user is typing in.
     if (event.target.matches('input, select, textarea')) return;
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
-      event.preventDefault();
-      event.shiftKey ? redo() : undo();
+
+    const key = event.key.toLowerCase();
+    const command = event.ctrlKey || event.metaKey;
+
+    if (command) {
+      // Command combinations are handled here and NOWHERE else. The bare-letter
+      // tool shortcuts below must not also match, or Ctrl+C would select the
+      // crop tool instead of copying the screenshot.
+      if (key === 'c') {
+        event.preventDefault();
+        copyToClipboard();
+      } else if (key === 's') {
+        event.preventDefault();
+        save();
+      } else if (key === 'z') {
+        event.preventDefault();
+        event.shiftKey ? redo() : undo();
+      } else if (key === 'y') {
+        event.preventDefault();
+        redo();
+      }
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+
+    // Alt combinations belong to the browser and the operating system.
+    if (event.altKey) return;
+
+    if (key === 'escape') {
       event.preventDefault();
-      save();
+      if (tool === 'crop') cancelCrop();
+      selectTool('move');
       return;
     }
-    const next = SHORTCUTS[event.key.toLowerCase()];
-    if (next) selectTool(next);
+    if (key === 'enter' && tool === 'crop') {
+      event.preventDefault();
+      applyCrop();
+      return;
+    }
+
+    const next = SHORTCUTS[key];
+    if (next) {
+      event.preventDefault();
+      selectTool(next);
+    }
   });
 
   boot().catch((err) => {

@@ -81,53 +81,58 @@ FS.plan = {
   },
 
   /**
-   * Where a captured viewport bitmap belongs on the stitch canvas, and which
-   * part of it to keep.
+   * Where a captured viewport bitmap belongs on the stitch canvas.
    *
-   * Two corrections happen here. The scrollbar gutter is cropped off so no
-   * scrollbar is baked into the output, and the source rect is clamped so a
-   * clamped final tile cannot draw past the canvas edge.
+   * Every capture mode is a REGION of something: the whole document, the
+   * current viewport, one element's box, or the scrollable content of an inner
+   * pane. The page agent decides which part of the viewport is valid right now
+   * (`clip`, in viewport CSS pixels) and where that part belongs in the output
+   * (`outXCss`/`outYCss`, in output CSS pixels). This function only converts to
+   * device pixels and clamps, so one code path serves all four modes.
+   *
+   * Doing it this way is what stops a viewport-sized bitmap being stretched to
+   * fill a full-page canvas, and what lets an element be captured from the
+   * middle of a page rather than from its top-left corner.
    */
-  placement({
-    landedXCss,
-    landedYCss,
+  placeClip({
+    outXCss,
+    outYCss,
+    clip,
     viewWidthCss,
     viewHeightCss,
-    scrollbarWidthCss = 0,
-    scrollbarHeightCss = 0,
     bitmapWidthPx,
     bitmapHeightPx,
     scale,
     canvasWidthPx,
     canvasHeightPx,
   }) {
-    // The bitmap covers the viewport including its scrollbars; trim them.
-    const usableWidthCss = Math.max(0, viewWidthCss - scrollbarWidthCss);
-    const usableHeightCss = Math.max(0, viewHeightCss - scrollbarHeightCss);
+    if (!clip || clip.w <= 0 || clip.h <= 0) return null;
 
-    // Capture-space scale can differ slightly from output scale (the bitmap is
-    // always at device resolution; output may be downscaled to fit the budget).
+    // The bitmap covers the whole viewport, scrollbars included, so viewport
+    // CSS pixels map straight onto it.
     const srcScaleX = bitmapWidthPx / viewWidthCss;
     const srcScaleY = bitmapHeightPx / viewHeightCss;
 
-    let destX = Math.round(landedXCss * scale);
-    let destY = Math.round(landedYCss * scale);
-    let destW = Math.round(usableWidthCss * scale);
-    let destH = Math.round(usableHeightCss * scale);
+    const destX = Math.round(outXCss * scale);
+    const destY = Math.round(outYCss * scale);
+    let destW = Math.round(clip.w * scale);
+    let destH = Math.round(clip.h * scale);
 
-    // Clamp against the canvas so the last tile cannot overflow it.
-    const overflowX = Math.max(0, destX + destW - canvasWidthPx);
-    const overflowY = Math.max(0, destY + destH - canvasHeightPx);
-    destW -= overflowX;
-    destH -= overflowY;
+    // A tile clamped at the end of the document can reach past the canvas.
+    destW -= Math.max(0, destX + destW - canvasWidthPx);
+    destH -= Math.max(0, destY + destH - canvasHeightPx);
+    if (destW <= 0 || destH <= 0 || destX < 0 || destY < 0) return null;
 
-    if (destW <= 0 || destH <= 0) return null;
+    // Trim the source by the same proportion, so a clamped tile is cropped
+    // rather than squashed.
+    const srcW = Math.min(bitmapWidthPx, Math.max(1, Math.round((destW / scale) * srcScaleX)));
+    const srcH = Math.min(bitmapHeightPx, Math.max(1, Math.round((destH / scale) * srcScaleY)));
 
     return {
-      srcX: 0,
-      srcY: 0,
-      srcW: Math.min(bitmapWidthPx, Math.round((destW / scale) * srcScaleX)),
-      srcH: Math.min(bitmapHeightPx, Math.round((destH / scale) * srcScaleY)),
+      srcX: Math.round(clip.x * srcScaleX),
+      srcY: Math.round(clip.y * srcScaleY),
+      srcW,
+      srcH,
       destX,
       destY,
       destW,

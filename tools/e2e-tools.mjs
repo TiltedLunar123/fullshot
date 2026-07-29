@@ -368,6 +368,64 @@ async function run() {
       `Undo left the canvas at ${undone.w}x${undone.h}`
     );
 
+    /* ---- Keyboard shortcuts --------------------------------------- */
+
+    const activeTool = () =>
+      cdp.evaluate(ed, `document.querySelector('.tool.is-active')?.dataset.tool ?? null`);
+
+    await useTool('move');
+
+    // The reported bug: bare-letter tool shortcuts were matched without
+    // checking modifiers, so Ctrl+C selected Crop instead of copying.
+    await cdp.pressKey(ed, 'c', { ctrl: true });
+    await sleep(200);
+    const afterCtrlC = await activeTool();
+    check(
+      afterCtrlC === 'move',
+      'Ctrl+C no longer switches to the crop tool',
+      `Ctrl+C selected "${afterCtrlC}" instead of leaving the tool alone`
+    );
+
+    // Bare C still selects crop.
+    await cdp.pressKey(ed, 'c');
+    await sleep(200);
+    const afterC = await activeTool();
+    check(afterC === 'crop', 'Bare C still selects the crop tool', `Bare C selected "${afterC}"`);
+
+    // Escape leaves crop and returns to move.
+    await cdp.send(
+      'Input.dispatchKeyEvent',
+      { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
+      ed
+    );
+    await sleep(200);
+    const afterEscape = await activeTool();
+    check(
+      afterEscape === 'move',
+      'Escape leaves the crop tool',
+      `Escape left the tool as "${afterEscape}"`
+    );
+
+    // Other command combinations must not select tools either.
+    for (const [letter, name] of [
+      ['v', 'move'],
+      ['a', 'arrow'],
+      ['t', 'text'],
+      ['b', 'redact'],
+      ['p', 'pixelate'],
+      ['r', 'box'],
+    ]) {
+      await useTool('move');
+      await cdp.pressKey(ed, letter, { ctrl: true });
+      await sleep(90);
+      const got = await activeTool();
+      if (got !== 'move') {
+        fail(`Ctrl+${letter.toUpperCase()} wrongly selected the ${name} tool`);
+        break;
+      }
+      if (letter === 'r') pass('No Ctrl combination selects a tool by accident');
+    }
+
     /* ---- Export still works after all of that --------------------- */
 
     const exported = await cdp.evaluate(

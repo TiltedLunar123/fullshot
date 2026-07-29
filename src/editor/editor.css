@@ -403,3 +403,14 @@ button {
     border-top: 1px solid var(--line);
   }
 }
+
+/* Inline key hint inside a button. */
+.mini {
+  margin-left: 6px;
+  padding: 1px 5px;
+  font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  opacity: 0.7;
+  background: rgba(127, 127, 127, 0.22);
+  border: 0;
+  border-radius: 4px;
+}

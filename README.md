@@ -115,7 +115,8 @@ npm run all        # build, zip, gate and tests
 npm run icons      # re-rasterise the icon PNGs (only after editing icon.svg)
 ```
 
-There are two end-to-end harnesses, both driving a real browser with no test framework.
+There are three end-to-end harnesses, all driving a real browser with no test
+framework.
 
 `npm run e2e` loads the built extension, captures `test-pages/torture.html`, and
 verifies the result pixel by pixel. The fixture encodes each block's index in its own
@@ -123,6 +124,12 @@ red channel, so a misplaced, duplicated or dropped slice shows up as the wrong c
 at a known height instead of a screenshot that merely looks plausible. It checks that
 the sticky header appears exactly once, that the fixed footer is not repeated, and that
 all twenty blocks landed at the correct offset.
+
+`npm run e2e:modes` verifies the other three capture modes: that a visible-area
+capture is viewport sized and not stretched onto a page-sized canvas, that an
+element captured from the middle of a page contains that element and nothing
+else, and that a scrolling panel is scrolled and stitched across its full content
+with all thirty rows landing at the right height.
 
 `npm run e2e:tools` drives every editor tool with real synthesised mouse and keyboard
 input and asserts on the resulting canvas: that Move changes nothing, that Box draws a

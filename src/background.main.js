@@ -126,12 +126,15 @@ async function runCapture({ tabId, windowId, mode, settings }) {
   const metrics = prep.metrics;
   warnings.push(...(metrics.warnings ?? []));
 
-  // Work out the output scale before allocating anything.
+  // Work out the output scale before allocating anything. The canvas is sized
+  // to the REGION being captured, not to the page: sizing it to the page and
+  // then drawing a viewport-sized bitmap into it is what stretches a
+  // visible-area capture.
   const budget = await FS.canvasBudget.measure();
   const requested = settings.retina ? metrics.dpr : 1;
   const fit = FS.plan.fitToBudget({
-    pageWidthCss: metrics.pageWidthCss,
-    pageHeightCss: metrics.pageHeightCss,
+    pageWidthCss: metrics.captureWidthCss,
+    pageHeightCss: metrics.captureHeightCss,
     scale: requested,
     maxArea: budget.maxArea,
     maxDimension: budget.maxDimension,
@@ -153,28 +156,28 @@ async function runCapture({ tabId, windowId, mode, settings }) {
   let sliceCount = 0;
 
   try {
-    if (mode === 'visible') {
-      const bitmap = await captureViewport(windowId, scheduler);
-      ctx.drawImage(bitmap, 0, 0, fit.widthPx, fit.heightPx);
-      bitmap.close();
+    // The one-shot path photographs the whole document, so it only applies
+    // when the whole document is what was asked for.
+    const oneShot =
+      mode === 'full'
+        ? await tryOneShot({ windowId, metrics, scale: fit.scale, scheduler })
+        : null;
+
+    if (oneShot) {
+      ctx.drawImage(oneShot, 0, 0, fit.widthPx, fit.heightPx);
+      oneShot.close();
       sliceCount = 1;
     } else {
-      const oneShot = await tryOneShot({ windowId, metrics, scale: fit.scale, scheduler });
-      if (oneShot) {
-        ctx.drawImage(oneShot, 0, 0, fit.widthPx, fit.heightPx);
-        oneShot.close();
-        sliceCount = 1;
-      } else {
-        sliceCount = await stitchByScrolling({
-          tabId,
-          windowId,
-          metrics,
-          fit,
-          ctx,
-          scheduler,
-          warnings,
-        });
-      }
+      sliceCount = await stitchByScrolling({
+        tabId,
+        mode,
+        windowId,
+        metrics,
+        fit,
+        ctx,
+        scheduler,
+        warnings,
+      });
     }
   } finally {
     // Always hand the page back the way we found it, even on failure.
@@ -199,12 +202,15 @@ async function runCapture({ tabId, windowId, mode, settings }) {
   };
 }
 
-async function stitchByScrolling({ tabId, windowId, metrics, fit, ctx, scheduler, warnings }) {
+async function stitchByScrolling({ tabId, mode, windowId, metrics, fit, ctx, scheduler, warnings }) {
+  // Tiles are positions in OUTPUT space, covering the region being captured in
+  // steps of whatever the agent said it can show at once. The agent translates
+  // each position into the right kind of scrolling for the mode.
   const tiles = FS.plan.tiles({
-    pageWidthCss: metrics.pageWidthCss,
-    pageHeightCss: metrics.pageHeightCss,
-    viewWidthCss: metrics.viewWidthCss,
-    viewHeightCss: metrics.viewHeightCss,
+    pageWidthCss: metrics.captureWidthCss,
+    pageHeightCss: metrics.captureHeightCss,
+    viewWidthCss: metrics.stepWidthCss,
+    viewHeightCss: metrics.stepHeightCss,
   });
 
   const rowYs = [...new Set(tiles.map((t) => t.y))];
@@ -226,26 +232,35 @@ async function stitchByScrolling({ tabId, windowId, metrics, fit, ctx, scheduler
     if (landed?.cancelled) throw new Error('CANCELLED');
     if (!landed?.ok) throw new Error(landed?.error || 'Lost contact with the page.');
 
-    // A page that grows or shrinks mid-capture (an infinite feed, or a
-    // virtualised list recycling rows) cannot be stitched coherently. Say so
-    // rather than emitting a subtly wrong image.
-    if (landed.pageHeightCss && Math.abs(landed.pageHeightCss - metrics.pageHeightCss) > 4) {
+    // A full-page capture of something that grows or shrinks mid-run (an
+    // infinite feed, or a virtualised list recycling rows) cannot be stitched
+    // coherently. Say so rather than emitting a subtly wrong image. Other
+    // modes are bounded by an element or the viewport, so page height moving
+    // underneath them is not a problem.
+    if (
+      mode === 'full' &&
+      landed.pageHeightCss &&
+      Math.abs(landed.pageHeightCss - metrics.pageHeightCss) > 4
+    ) {
       warnings.push(
         'The page changed height while it was being captured, so part of the image may repeat or be missing. Pages that load more content as you scroll are hard to capture completely.'
       );
       metrics.pageHeightCss = landed.pageHeightCss;
     }
 
+    // The region is simply not present in this slice; that is expected for any
+    // region smaller than the viewport.
+    if (landed.skip) continue;
+
     const bitmap = await captureViewport(windowId, scheduler);
     await tell(tabId, { type: 'FS_AFTER_SHOT' }).catch(() => {});
 
-    const place = FS.plan.placement({
-      landedXCss: landed.landedX,
-      landedYCss: landed.landedY,
+    const place = FS.plan.placeClip({
+      outXCss: landed.outX,
+      outYCss: landed.outY,
+      clip: landed.clip,
       viewWidthCss: metrics.viewWidthCss,
       viewHeightCss: metrics.viewHeightCss,
-      scrollbarWidthCss: metrics.scrollbarWidthCss,
-      scrollbarHeightCss: metrics.scrollbarHeightCss,
       bitmapWidthPx: bitmap.width,
       bitmapHeightPx: bitmap.height,
       scale: fit.scale,
@@ -268,6 +283,15 @@ async function stitchByScrolling({ tabId, windowId, metrics, fit, ctx, scheduler
       drawn++;
     }
     bitmap.close();
+  }
+
+  // Every slice was skipped or fell outside the canvas, so the image would be
+  // blank. That is a failure, not a screenshot, and saying so beats handing
+  // back an empty picture.
+  if (drawn === 0) {
+    throw new Error(
+      'Fullshot could not bring that target into view, so there was nothing to capture. If it sits inside a scrolling panel, try the scrolling panel mode instead.'
+    );
   }
 
   return drawn;

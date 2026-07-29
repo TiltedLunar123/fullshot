@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.0.1
+
+Fixes for the three non-full-page capture modes, and for the editor shortcuts.
+
+- Visible-area capture was drawn stretched. The stitch canvas was sized to the
+  whole page and the viewport bitmap was scaled up to fill it, so on a long
+  page the result was badly elongated. Capture is now modelled as a REGION,
+  and the canvas is sized to that region.
+- Element capture did not work. It narrowed the width to the element and
+  extended the height to the element's bottom, but never applied the element's
+  position, so it returned the top-left of the page instead. It now captures
+  the element's own box wherever it sits.
+- Scrolling panel capture now scrolls the panel and stitches its whole
+  content, on both axes.
+- A panel's border no longer shifts or leaks into the capture. scrollTop and
+  clientHeight are padding-box metrics while getBoundingClientRect returns the
+  border box; treating them as the same origin shifted every slice by the
+  border width.
+- Page furniture (fixed headers, footers, cookie bars) is no longer composited
+  over an element or panel capture. Visible-area capture keeps it, since that
+  mode is a literal photograph of the screen.
+- A capture where nothing could be brought into view now reports a clear error
+  instead of silently saving a blank image.
+- Ctrl+C copies the screenshot. It previously matched the bare "c" crop
+  shortcut, because modifiers were not checked before the tool shortcuts, so
+  no Ctrl combination did what it should. Ctrl+S saves, Ctrl+Z and Ctrl+Y
+  undo and redo, Enter applies a crop, and Escape cancels.
+- Recoloured to crimson, with a single-hue icon gradient.
+- Optional text sharpening for captures that had to be scaled down.
+
 ## 1.0.0
 
 First release.

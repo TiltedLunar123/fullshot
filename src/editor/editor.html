@@ -14,7 +14,7 @@
 
       <div class="tools" role="toolbar" aria-label="Editing tools">
         <button class="tool is-active" data-tool="move" title="Move and pan (V)"><span>Move</span></button>
-        <button class="tool" data-tool="crop" title="Crop (C)"><span>Crop</span></button>
+        <button class="tool" data-tool="crop" title="Crop (C). Enter applies, Escape cancels."><span>Crop</span></button>
         <button class="tool" data-tool="box" title="Rectangle (R)"><span>Box</span></button>
         <button class="tool" data-tool="arrow" title="Arrow (A)"><span>Arrow</span></button>
         <button class="tool" data-tool="text" title="Text (T)"><span>Text</span></button>
@@ -40,7 +40,7 @@
 
     <div class="crop-bar" hidden>
       <span>Drag on the image to choose an area.</span>
-      <button class="primary sm" id="crop-apply">Apply crop</button>
+      <button class="primary sm" id="crop-apply">Apply crop <kbd class="mini">Enter</kbd></button>
       <button class="ghost sm" id="crop-cancel">Cancel</button>
     </div>
 
@@ -115,8 +115,8 @@
           <input type="text" id="filename" spellcheck="false" />
         </div>
 
-        <button class="primary" id="save">Save</button>
-        <button class="secondary" id="copy">Copy to clipboard</button>
+        <button class="primary" id="save">Save <kbd class="mini">Ctrl+S</kbd></button>
+        <button class="secondary" id="copy">Copy to clipboard <kbd class="mini">Ctrl+C</kbd></button>
         <p class="hint" id="hint"></p>
       </section>
 

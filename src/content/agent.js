@@ -147,8 +147,18 @@
   }
 
   function applyFloatingPolicy(rowIndex, rowCount) {
-    if (!session || session.settings.floatingPolicy === 'keep') return;
-    const hideAll = session.settings.floatingPolicy === 'never';
+    if (!session) return;
+
+    // Visible-area capture is a literal photograph of the screen, so page
+    // furniture belongs in it exactly as the user sees it.
+    if (session.mode === 'visible') return;
+
+    // When a specific element or panel was picked, page-level fixed furniture
+    // is not part of it. Leaving it visible composites a cookie bar or footer
+    // over the thing the user actually asked for.
+    const targeted = session.mode === 'element' || session.mode === 'area';
+    if (!targeted && session.settings.floatingPolicy === 'keep') return;
+    const hideAll = targeted || session.settings.floatingPolicy === 'never';
 
     for (const { el, dock } of session.floating.fixed) {
       const showHere =
@@ -396,6 +406,10 @@
       style: null,
       overlay: null,
       target: null,
+      mode,
+      region: null,
+      usableWidthCss: 1,
+      usableHeightCss: 1,
     };
 
     if (mode === 'element' || mode === 'area') {
@@ -425,22 +439,93 @@
       await Promise.race([document.fonts.ready, sleep(1200)]);
     }
 
-    window.scrollTo(0, 0);
-    await nextFrame();
+    // Return to the top only when the whole page is going to be walked.
+    // Visible-area capture must photograph what the user is actually looking
+    // at, so moving the page first would defeat the entire mode.
+    if (mode === 'full') {
+      window.scrollTo(0, 0);
+      await nextFrame();
+    }
 
     const metrics = measure();
 
-    // An element or inner-pane capture is bounded by that element, not the page.
-    if (session.target) {
+    // Work out WHAT is being captured. Every mode is a rectangular region of
+    // something, and expressing all of them the same way is what keeps the
+    // stitcher from having a special case per mode.
+    const usableWidthCss = Math.max(1, metrics.viewWidthCss - metrics.scrollbarWidthCss);
+    const usableHeightCss = Math.max(1, metrics.viewHeightCss - metrics.scrollbarHeightCss);
+    session.usableWidthCss = usableWidthCss;
+    session.usableHeightCss = usableHeightCss;
+    metrics.usableWidthCss = usableWidthCss;
+    metrics.usableHeightCss = usableHeightCss;
+
+    let region;
+    let step = { w: usableWidthCss, h: usableHeightCss };
+
+    if (mode === 'visible') {
+      // Exactly what the user is looking at, and nothing more.
+      region = {
+        x: window.scrollX,
+        y: window.scrollY,
+        w: usableWidthCss,
+        h: usableHeightCss,
+      };
+    } else if (mode === 'element') {
+      // An element inside its own scrolling ancestor cannot be reached by
+      // scrolling the window, so ask the browser to bring it into view first.
+      const clipper = nearestScrollable(session.target.parentElement);
+      if (clipper) {
+        session.target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        await nextFrame();
+        warnings.push(
+          'That element sits inside its own scrolling panel. Only the part that fits in the panel could be captured, so try the scrolling panel mode for the whole thing.'
+        );
+      }
+
+      // The element's box in DOCUMENT coordinates. Measured now, after
+      // priming, because loading images can move things.
       const rect = session.target.getBoundingClientRect();
-      metrics.pageWidthCss = Math.min(metrics.pageWidthCss, Math.ceil(rect.width));
-      metrics.pageHeightCss =
-        mode === 'area'
-          ? session.target.scrollHeight
-          : Math.ceil(rect.height + window.scrollY + rect.top);
+      region = {
+        x: Math.max(0, rect.left + window.scrollX),
+        y: Math.max(0, rect.top + window.scrollY),
+        w: Math.max(1, Math.round(rect.width)),
+        h: Math.max(1, Math.round(rect.height)),
+      };
+    } else if (mode === 'area') {
+      const el = session.target;
+      el.scrollTop = 0;
+      el.scrollLeft = 0;
+      await nextFrame();
+      const visible = bringPaneIntoView();
+      await nextFrame();
+      // The pane's whole scrollable content, both axes.
+      region = {
+        x: 0,
+        y: 0,
+        w: Math.max(1, el.scrollWidth),
+        h: Math.max(1, el.scrollHeight),
+      };
+      // Step by how much of the pane is actually on screen, slightly reduced
+      // so consecutive slices overlap rather than risk a one-pixel gap.
+      step = {
+        w: Math.max(1, visible.width - 8),
+        h: Math.max(1, visible.height - 8),
+      };
+      if (el.scrollHeight <= el.clientHeight + 2 && el.scrollWidth <= el.clientWidth + 2) {
+        warnings.push('That panel does not scroll, so it was captured as it appears.');
+      }
+    } else {
+      region = { x: 0, y: 0, w: metrics.pageWidthCss, h: metrics.pageHeightCss };
     }
 
-    if (metrics.pageHeightCss > 60000) {
+    session.region = region;
+    metrics.region = region;
+    metrics.captureWidthCss = region.w;
+    metrics.captureHeightCss = region.h;
+    metrics.stepWidthCss = step.w;
+    metrics.stepHeightCss = step.h;
+
+    if (metrics.captureHeightCss > 60000) {
       warnings.push(
         'This page is extremely long, so the capture may take a while and will be scaled down to fit an image.'
       );
@@ -465,19 +550,130 @@
     return { ok: true, metrics };
   }
 
+  /**
+   * A scrollable element's PADDING box, in viewport coordinates.
+   *
+   * This distinction matters and is easy to get wrong. getBoundingClientRect
+   * returns the BORDER box, but scrollTop, scrollLeft, clientWidth and
+   * clientHeight are all relative to the padding box. Treating the border box
+   * as the origin of scrolled content shifts every slice by the border width
+   * and paints the border itself into the output.
+   */
+  function paneBox() {
+    const el = session.target;
+    const rect = el.getBoundingClientRect();
+    let borderLeft = 0;
+    let borderTop = 0;
+    try {
+      const cs = getComputedStyle(el);
+      borderLeft = parseFloat(cs.borderLeftWidth) || 0;
+      borderTop = parseFloat(cs.borderTopWidth) || 0;
+    } catch {
+      /* fall back to the border box */
+    }
+    return {
+      left: rect.left + borderLeft,
+      top: rect.top + borderTop,
+      // clientWidth/clientHeight are the padding box, minus any scrollbar.
+      width: Math.max(1, el.clientWidth),
+      height: Math.max(1, el.clientHeight),
+    };
+  }
+
+  /**
+   * Scroll the window so an inner pane is on screen.
+   * Returns how much of the pane is actually visible, in CSS pixels.
+   */
+  function bringPaneIntoView() {
+    const usableH = session.usableHeightCss;
+    const usableW = session.usableWidthCss;
+    let box = paneBox();
+
+    // Only move the page if the pane is off screen or awkwardly low; a pane
+    // already comfortably in view should stay where the user had it.
+    if (box.top < 0 || box.top > usableH * 0.4) {
+      window.scrollBy(0, box.top - 8);
+      box = paneBox();
+    }
+    return {
+      height: Math.max(1, Math.min(box.top + box.height, usableH) - Math.max(0, box.top)),
+      width: Math.max(1, Math.min(box.left + box.width, usableW) - Math.max(0, box.left)),
+    };
+  }
+
+  /**
+   * The part of the current viewport that belongs to the region, and where it
+   * lands in the output image. Both in CSS pixels.
+   *
+   * Returning `skip` is normal: a region smaller than the viewport simply is
+   * not present in every slice.
+   */
+  function documentClip() {
+    const region = session.region;
+    const usableW = session.usableWidthCss;
+    const usableH = session.usableHeightCss;
+
+    // The region, expressed in viewport coordinates as things stand now.
+    const vx = region.x - window.scrollX;
+    const vy = region.y - window.scrollY;
+
+    const x0 = Math.max(0, vx);
+    const y0 = Math.max(0, vy);
+    const x1 = Math.min(usableW, vx + region.w);
+    const y1 = Math.min(usableH, vy + region.h);
+    if (x1 <= x0 || y1 <= y0) return { skip: true };
+
+    const clip = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    return {
+      clip,
+      // Derived from the offset the page ACTUALLY landed on. Browsers clamp a
+      // scroll at the end of the document, which makes the last slice overlap
+      // the previous one; measuring rather than assuming makes that harmless.
+      outX: window.scrollX + clip.x - region.x,
+      outY: window.scrollY + clip.y - region.y,
+    };
+  }
+
+  /** The same, for a pane that scrolls its own content. */
+  function paneClip() {
+    const el = session.target;
+    const usableW = session.usableWidthCss;
+    const usableH = session.usableHeightCss;
+    // The padding box, so the pane's own border is never painted into the
+    // output and scrollTop lines up with the content it addresses.
+    const box = paneBox();
+
+    const x0 = Math.max(0, box.left);
+    const y0 = Math.max(0, box.top);
+    const x1 = Math.min(usableW, box.left + box.width);
+    const y1 = Math.min(usableH, box.top + box.height);
+    if (x1 <= x0 || y1 <= y0) return { skip: true };
+
+    const clip = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    return {
+      clip,
+      // The pane's own scroll offsets decide which content sits at its top
+      // left corner, so output position follows those, not the window.
+      outX: el.scrollLeft + (clip.x - box.left),
+      outY: el.scrollTop + (clip.y - box.top),
+    };
+  }
+
   async function goto(msg) {
     if (!session) return { ok: false, error: 'Capture session was lost.' };
     if (session.cancelled) return { ok: false, cancelled: true };
 
     applyFloatingPolicy(msg.rowIndex, msg.rowCount);
 
-    if (session.target && session.settings && msg.rowCount) {
-      // Inner-pane mode drives the element's own scroll offset.
-      if (session.target.scrollHeight > session.target.clientHeight) {
-        session.target.scrollTop = msg.y;
-      }
+    if (session.mode === 'area') {
+      session.target.scrollTop = msg.y;
+      session.target.scrollLeft = msg.x;
+      await nextFrame();
+      bringPaneIntoView();
+    } else if (session.mode !== 'visible') {
+      // Targets arrive in output space, so shift them by the region origin.
+      window.scrollTo(session.region.x + msg.x, session.region.y + msg.y);
     }
-    window.scrollTo(msg.x, msg.y);
 
     await nextFrame();
     await sleep(session.settings.settleMs);
@@ -496,15 +692,8 @@
       return { ok: false, cancelled: true };
     }
 
-    return {
-      ok: true,
-      // The offset the page ACTUALLY landed on. Clamping at the end of the
-      // document is normal and makes the last slice overlap the previous one;
-      // placing by measured offset makes that overlap harmless.
-      landedX: window.scrollX,
-      landedY: window.scrollY,
-      pageHeightCss: docHeight(),
-    };
+    const placement = session.mode === 'area' ? paneClip() : documentClip();
+    return { ok: true, ...placement, pageHeightCss: docHeight() };
   }
 
   function restore() {

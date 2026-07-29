@@ -172,10 +172,15 @@
         blocks.append(el);
       }
 
+      // The inner pane's rows encode their index the same way the blocks do
+      // (red = i * 8), so a scrolling-panel capture can be verified row by row.
+      const PANE_ROWS = 30;
+      const PANE_ROW_HEIGHT = 60;
       const pane = document.getElementById('inner-pane');
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < PANE_ROWS; i++) {
         const row = document.createElement('div');
         row.className = 'row';
+        row.style.background = `rgb(${i * 8}, 60, 120)`;
         row.textContent = `Inner pane row ${i}`;
         pane.append(row);
       }
@@ -185,8 +190,21 @@
         blockCount: BLOCK_COUNT,
         blockHeight: BLOCK_HEIGHT,
         headerHeight: 60,
+        paneRows: PANE_ROWS,
+        paneRowHeight: PANE_ROW_HEIGHT,
         get blocksTop() {
           return document.getElementById('blocks').getBoundingClientRect().top + window.scrollY;
+        },
+        /** Viewport-space centre of a block, for driving the element picker. */
+        blockPoint(index) {
+          const el = document.querySelector(`.block[data-index="${index}"]`);
+          const r = el.getBoundingClientRect();
+          // Left side, clear of the lazily-loaded image on the right.
+          return { x: r.left + 30, y: r.top + r.height / 2, top: r.top, height: r.height, width: r.width };
+        },
+        panePoint() {
+          const r = document.getElementById('inner-pane').getBoundingClientRect();
+          return { x: r.left + 20, y: r.top + 20, top: r.top, height: r.height, width: r.width };
         },
       };
     </script>

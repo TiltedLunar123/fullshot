@@ -117,31 +117,116 @@ test('fitToBudget respects a single-axis dimension limit', () => {
   assert.ok(fit.heightPx <= maxDimension, `height ${fit.heightPx} exceeds ${maxDimension}`);
 });
 
-test('placement crops the scrollbar gutter out of every slice', () => {
-  const place = FS.plan.placement({
-    landedXCss: 0,
-    landedYCss: 0,
+test('placeClip keeps a viewport-sized capture at its natural size', () => {
+  // This is the visible-area case. The canvas is the size of the viewport, so
+  // the bitmap must land 1:1. Sizing the canvas to the whole page and drawing
+  // into all of it is what produced a badly stretched image.
+  const place = FS.plan.placeClip({
+    outXCss: 0,
+    outYCss: 0,
+    clip: { x: 0, y: 0, w: 785, h: 600 },
     viewWidthCss: 800,
     viewHeightCss: 600,
-    scrollbarWidthCss: 15,
-    scrollbarHeightCss: 0,
-    bitmapWidthPx: 1600,
+    bitmapWidthPx: 800,
+    bitmapHeightPx: 600,
+    scale: 1,
+    canvasWidthPx: 785,
+    canvasHeightPx: 600,
+  });
+  assert.equal(place.destX, 0);
+  assert.equal(place.destY, 0);
+  assert.equal(place.destW, 785, 'destination must match the clip, not the canvas');
+  assert.equal(place.destH, 600);
+  assert.equal(place.srcW, 785, 'source must match too, or the image is scaled');
+  assert.equal(place.srcH, 600);
+});
+
+test('placeClip maps the clip through the scrollbar-inclusive bitmap', () => {
+  // The bitmap covers the whole viewport including the scrollbar gutter, so a
+  // 785px clip of an 800px viewport must read 785 bitmap px, not 800.
+  const place = FS.plan.placeClip({
+    outXCss: 0,
+    outYCss: 0,
+    clip: { x: 0, y: 0, w: 785, h: 600 },
+    viewWidthCss: 800,
+    viewHeightCss: 600,
+    bitmapWidthPx: 1600, // 2x DPR
     bitmapHeightPx: 1200,
     scale: 1,
     canvasWidthPx: 785,
-    canvasHeightPx: 5000,
+    canvasHeightPx: 600,
   });
-  // 800 CSS px of viewport minus a 15px scrollbar leaves 785 of real content.
+  assert.equal(place.srcW, 1570, '785 CSS px at 2x device pixels is 1570');
   assert.equal(place.destW, 785);
-  assert.equal(place.destX, 0);
 });
 
-test('placement clamps the final slice to the canvas edge', () => {
-  // A page 1000 tall with a 600 viewport: the last slice lands at 400 and
-  // would otherwise draw 200px past the bottom of the canvas.
-  const place = FS.plan.placement({
-    landedXCss: 0,
-    landedYCss: 400,
+test('placeClip offsets an element region away from the page origin', () => {
+  // An element at document (300, 2400). The slice that shows its top-left is
+  // captured with the page scrolled to (300, 2400), so the element starts at
+  // viewport (0,0) and belongs at output (0,0). Getting this wrong is what
+  // made element capture return the top-left of the page instead.
+  const place = FS.plan.placeClip({
+    outXCss: 0,
+    outYCss: 0,
+    clip: { x: 0, y: 0, w: 500, h: 600 },
+    viewWidthCss: 800,
+    viewHeightCss: 600,
+    bitmapWidthPx: 800,
+    bitmapHeightPx: 600,
+    scale: 1,
+    canvasWidthPx: 500,
+    canvasHeightPx: 1800,
+  });
+  assert.equal(place.destX, 0);
+  assert.equal(place.destW, 500, 'only the element width is kept');
+  assert.equal(place.srcW, 500);
+});
+
+test('placeClip places a later slice of a region at its output offset', () => {
+  const place = FS.plan.placeClip({
+    outXCss: 0,
+    outYCss: 600,
+    clip: { x: 0, y: 0, w: 500, h: 600 },
+    viewWidthCss: 800,
+    viewHeightCss: 600,
+    bitmapWidthPx: 800,
+    bitmapHeightPx: 600,
+    scale: 1,
+    canvasWidthPx: 500,
+    canvasHeightPx: 1800,
+  });
+  assert.equal(place.destY, 600);
+  assert.equal(place.destH, 600);
+});
+
+test('placeClip reads from the middle of the viewport when the region does', () => {
+  // A short element sitting partway down the screen: the clip starts at a
+  // viewport offset, so the source rect must start there too.
+  const place = FS.plan.placeClip({
+    outXCss: 0,
+    outYCss: 0,
+    clip: { x: 120, y: 200, w: 300, h: 150 },
+    viewWidthCss: 800,
+    viewHeightCss: 600,
+    bitmapWidthPx: 800,
+    bitmapHeightPx: 600,
+    scale: 1,
+    canvasWidthPx: 300,
+    canvasHeightPx: 150,
+  });
+  assert.equal(place.srcX, 120);
+  assert.equal(place.srcY, 200);
+  assert.equal(place.destX, 0);
+  assert.equal(place.destY, 0);
+});
+
+test('placeClip clamps the final slice to the canvas edge', () => {
+  // The browser clamps the last scroll, so the last slice overlaps. It must be
+  // cropped at the canvas edge rather than overflowing it.
+  const place = FS.plan.placeClip({
+    outXCss: 0,
+    outYCss: 400,
+    clip: { x: 0, y: 0, w: 800, h: 600 },
     viewWidthCss: 800,
     viewHeightCss: 600,
     bitmapWidthPx: 800,
@@ -155,10 +240,64 @@ test('placement clamps the final slice to the canvas edge', () => {
   assert.ok(place.destY + place.destH <= 1000, 'slice must not overflow the canvas');
 });
 
-test('placement returns null when a slice would be entirely off-canvas', () => {
-  const place = FS.plan.placement({
-    landedXCss: 2000,
-    landedYCss: 0,
+test('placeClip crops rather than squashes a clamped slice', () => {
+  const place = FS.plan.placeClip({
+    outXCss: 0,
+    outYCss: 900,
+    clip: { x: 0, y: 0, w: 800, h: 600 },
+    viewWidthCss: 800,
+    viewHeightCss: 600,
+    bitmapWidthPx: 800,
+    bitmapHeightPx: 600,
+    scale: 1,
+    canvasWidthPx: 800,
+    canvasHeightPx: 1000,
+  });
+  assert.equal(place.destH, 100, 'only 100px of canvas remains');
+  assert.equal(place.srcH, 100, 'so only 100px of source may be read');
+});
+
+test('placeClip scales device pixels correctly on a HiDPI capture', () => {
+  const place = FS.plan.placeClip({
+    outXCss: 0,
+    outYCss: 600,
+    clip: { x: 0, y: 0, w: 800, h: 600 },
+    viewWidthCss: 800,
+    viewHeightCss: 600,
+    bitmapWidthPx: 1600, // 2x device pixel ratio
+    bitmapHeightPx: 1200,
+    scale: 2,
+    canvasWidthPx: 1600,
+    canvasHeightPx: 4000,
+  });
+  assert.equal(place.destY, 1200, 'a 600 CSS px offset at 2x is 1200 device px');
+  assert.equal(place.destW, 1600);
+  assert.equal(place.destH, 1200);
+  assert.equal(place.srcW, 1600);
+  assert.equal(place.srcH, 1200);
+});
+
+test('placeClip rejects an empty or missing clip', () => {
+  const base = {
+    outXCss: 0,
+    outYCss: 0,
+    viewWidthCss: 800,
+    viewHeightCss: 600,
+    bitmapWidthPx: 800,
+    bitmapHeightPx: 600,
+    scale: 1,
+    canvasWidthPx: 800,
+    canvasHeightPx: 600,
+  };
+  assert.equal(FS.plan.placeClip({ ...base, clip: null }), null);
+  assert.equal(FS.plan.placeClip({ ...base, clip: { x: 0, y: 0, w: 0, h: 100 } }), null);
+});
+
+test('placeClip returns null when a slice would be entirely off-canvas', () => {
+  const place = FS.plan.placeClip({
+    outXCss: 2000,
+    outYCss: 0,
+    clip: { x: 0, y: 0, w: 800, h: 600 },
     viewWidthCss: 800,
     viewHeightCss: 600,
     bitmapWidthPx: 800,
@@ -168,24 +307,6 @@ test('placement returns null when a slice would be entirely off-canvas', () => {
     canvasHeightPx: 600,
   });
   assert.equal(place, null);
-});
-
-test('placement scales device pixels correctly on a HiDPI capture', () => {
-  const place = FS.plan.placement({
-    landedXCss: 0,
-    landedYCss: 600,
-    viewWidthCss: 800,
-    viewHeightCss: 600,
-    bitmapWidthPx: 1600, // 2x device pixel ratio
-    bitmapHeightPx: 1200,
-    scale: 2,
-    canvasWidthPx: 1600,
-    canvasHeightPx: 4000,
-  });
-  assert.equal(place.destX, 0);
-  assert.equal(place.destY, 1200, 'a 600 CSS px offset at 2x is 1200 device px');
-  assert.equal(place.destW, 1600);
-  assert.equal(place.destH, 1200);
 });
 
 test('paginate covers every row of the image exactly once', () => {
