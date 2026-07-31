@@ -90,7 +90,10 @@ and anything older than a day is discarded.
 
 ## Install
 
-Not yet published to either store. To run it from source:
+On the [Chrome Web Store](https://chromewebstore.google.com/detail/fullshot-full-page-screen/fbhdnoklfeahhmmdmiblndcjmeagjfci).
+The Firefox build is submitted to addons.mozilla.org and awaiting review.
+
+To run it from source:
 
 **Chrome or Edge**: go to `chrome://extensions`, turn on Developer mode, choose
 "Load unpacked", and select `dist/chrome`.
