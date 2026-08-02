@@ -342,7 +342,7 @@ async function writeZip(sourceDir, zipPath) {
     local.writeUInt16LE(0, 6);
     local.writeUInt16LE(method, 8);
     local.writeUInt16LE(0, 10); // time
-    local.writeUInt16LE(0x21, 12); // date: deterministic 1996-01-01
+    local.writeUInt16LE(0x21, 12); // date: deterministic 1980-01-01
     local.writeUInt32LE(crc, 14);
     local.writeUInt32LE(body.length, 18);
     local.writeUInt32LE(f.data.length, 22);
