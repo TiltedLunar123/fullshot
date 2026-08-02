@@ -152,6 +152,15 @@ export class CDP {
     );
   }
 
+  /** Move the pointer with no button held, the way a user crosses the page. */
+  async hover(sessionId, to) {
+    await this.send(
+      'Input.dispatchMouseEvent',
+      { type: 'mouseMoved', x: to.x, y: to.y, button: 'none', buttons: 0 },
+      sessionId
+    );
+  }
+
   async click(sessionId, at) {
     await this.send(
       'Input.dispatchMouseEvent',
@@ -227,7 +236,26 @@ export function deriveExtensionId(derPublicKey) {
  * variant stands in for that gesture. It is never zipped and never gated as a
  * release artefact; `tools/build.mjs --check` verifies the real permission set.
  */
+/**
+ * Build the shipping extension, then derive a test variant from it.
+ *
+ * The build is run here rather than assumed. This used to copy whatever
+ * dist/chrome happened to hold, so editing src and running an end-to-end
+ * suite tested the PREVIOUS build: every check still passed and the run looked
+ * like proof that a change worked when it had never been loaded.
+ */
 export async function buildTestVariant(root, outName = 'e2e') {
+  await new Promise((resolve, reject) => {
+    const build = spawn(process.execPath, [path.join(root, 'tools', 'build.mjs')], {
+      cwd: root,
+      stdio: 'ignore',
+    });
+    build.on('error', reject);
+    build.on('exit', (code) =>
+      code === 0 ? resolve() : reject(new Error(`build.mjs exited with code ${code}`))
+    );
+  });
+
   const from = path.join(root, 'dist', 'chrome');
   const to = path.join(root, 'dist', outName);
   await fs.rm(to, { recursive: true, force: true });

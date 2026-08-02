@@ -199,6 +199,41 @@ test('placeClip places a later slice of a region at its output offset', () => {
   assert.equal(place.destH, 600);
 });
 
+test('consecutive slices leave no gap at any downscale factor', () => {
+  // The seam bug: rounding the destination position and the destination size
+  // separately can leave a one-pixel row belonging to neither slice, which
+  // shows up as a white hairline across an otherwise correct screenshot. It
+  // only appears at certain step/scale combinations, so sweep them.
+  const step = 937; // an ordinary viewport height, deliberately not round
+
+  for (let hundredths = 5; hundredths <= 100; hundredths++) {
+    const scale = hundredths / 100;
+    const canvasHeightPx = Math.ceil(step * 12 * scale) + 4;
+    let covered = 0;
+
+    for (let k = 0; k < 10; k++) {
+      const place = FS.plan.placeClip({
+        outXCss: 0,
+        outYCss: k * step,
+        clip: { x: 0, y: 0, w: 800, h: step },
+        viewWidthCss: 800,
+        viewHeightCss: step,
+        bitmapWidthPx: 800,
+        bitmapHeightPx: step,
+        scale,
+        canvasWidthPx: Math.ceil(800 * scale),
+        canvasHeightPx,
+      });
+      assert.ok(place, `slice ${k} at scale ${scale} was dropped`);
+      assert.ok(
+        place.destY <= covered,
+        `scale ${scale}: slice ${k} starts at ${place.destY} but the one before it ended at ${covered}, leaving a ${place.destY - covered}px seam`
+      );
+      covered = Math.max(covered, place.destY + place.destH);
+    }
+  }
+});
+
 test('placeClip reads from the middle of the viewport when the region does', () => {
   // A short element sitting partway down the screen: the clip starts at a
   // viewport offset, so the source rect must start there too.

@@ -114,6 +114,22 @@
   }
 
   /**
+   * Is this element part of what the user pointed at?
+   *
+   * The floating-chrome rules exist to get cookie bars and docked headers out of
+   * a page capture. Applied to the capture target itself they do the opposite of
+   * what was asked: a fixed sidebar picked in scrolling-panel mode was being
+   * hidden as furniture, and since a hidden element still has a layout box the
+   * stitch came back as a picture of whatever sat behind it. Ancestors count
+   * too, because visibility is inherited.
+   */
+  function partOfTarget(el) {
+    const target = session?.target;
+    if (!target) return false;
+    return el === target || el.contains(target) || target.contains(el);
+  }
+
+  /**
    * Classify floating chrome.
    *
    * Sticky and fixed are treated differently because they mean different
@@ -129,6 +145,7 @@
     for (const el of document.querySelectorAll('*')) {
       if (el === overlay || overlay?.contains(el)) continue;
       if (el.id === STYLE_ID) continue;
+      if (partOfTarget(el)) continue;
 
       let cs;
       try {
@@ -189,12 +206,31 @@
   async function scrollWindowTo(x, y) {
     const scroller = document.scrollingElement || document.documentElement;
 
+    /**
+     * Both axes, not just the vertical one.
+     *
+     * Only Y used to be checked, so on a page wider than the viewport every
+     * column reported success whether or not it had moved sideways, and the
+     * right-hand columns of the stitch came back as bare canvas.
+     */
+    const settled = () => {
+      const offX = Math.abs(window.scrollX - x);
+      const offY = Math.abs(window.scrollY - y);
+      // Asking to go past the end lands short. That is the browser clamping,
+      // and it is expected on the last tile of each axis.
+      const maxX = Math.max(0, docWidth() - window.innerWidth);
+      const maxY = Math.max(0, docHeight() - window.innerHeight);
+      const okX = offX <= 1 || (x >= maxX && Math.abs(window.scrollX - maxX) <= 2);
+      const okY = offY <= 1 || (y >= maxY && Math.abs(window.scrollY - maxY) <= 2);
+      return okX && okY;
+    };
+
     for (let attempt = 0; attempt < 3; attempt++) {
       window.scrollTo(x, y);
 
       // Some pages leave window.scrollTo inert but honour the scrolling
       // element directly, so try that before giving up on this attempt.
-      if (Math.abs(window.scrollY - y) > 1 && scroller) {
+      if (!settled() && scroller) {
         try {
           scroller.scrollTop = y;
           scroller.scrollLeft = x;
@@ -204,17 +240,10 @@
       }
       await nextFrame();
 
-      const offBy = Math.abs(window.scrollY - y);
-      if (offBy <= 1) return true;
-
-      // Asking to go past the end lands short. That is the browser clamping,
-      // and it is expected on the final tile.
-      const maxScroll = Math.max(0, docHeight() - window.innerHeight);
-      if (y >= maxScroll && Math.abs(window.scrollY - maxScroll) <= 2) return true;
-
+      if (settled()) return true;
       await sleep(40);
     }
-    return Math.abs(window.scrollY - y) <= 1;
+    return settled();
   }
 
   /**
@@ -347,6 +376,22 @@
   /* Element picker                                                    */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * Where every scroller between `el` and the document currently sits.
+   *
+   * Capturing a panel rewinds it to its top, and bringing an element into view
+   * can move any scroller above it. Only the window's own position used to be
+   * put back, so taking a screenshot of one message in a mail client dumped the
+   * user at the other end of the thread when it finished.
+   */
+  function scrollChainOf(el) {
+    const chain = [];
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      chain.push({ el: n, top: n.scrollTop, left: n.scrollLeft });
+    }
+    return chain;
+  }
+
   function nearestScrollable(start) {
     for (let el = start; el && el !== document.body; el = el.parentElement) {
       const cs = getComputedStyle(el);
@@ -452,6 +497,8 @@
       scrollX: window.scrollX,
       scrollY: window.scrollY,
       promoted: [],
+      scrollers: [],
+      watchdog: null,
       floating: { sticky: [], fixed: [] },
       style: null,
       overlay: null,
@@ -469,6 +516,9 @@
         return { ok: false, error: 'CANCELLED' };
       }
       session.target = picked;
+      // Recorded before anything is moved, which is the only moment these
+      // values are still the user's.
+      session.scrollers = scrollChainOf(picked);
     }
 
     session.style = installStyle(settings);
@@ -566,6 +616,18 @@
         w: Math.max(1, el.scrollWidth),
         h: Math.max(1, el.scrollHeight),
       };
+      // A pane that still cannot be brought meaningfully on screen would give a
+      // step of a few pixels, and a few pixels of step over a full-size pane is
+      // thousands of screenshots. Say so instead of grinding.
+      if (visible.width < 40 || visible.height < 40) {
+        restore();
+        return {
+          ok: false,
+          error:
+            'Almost none of that panel is on screen, so there is nothing to scroll through. Bring it into view and try again.',
+        };
+      }
+
       // Step by how much of the pane is actually on screen, slightly reduced
       // so consecutive slices overlap rather than risk a one-pixel gap.
       step = {
@@ -608,6 +670,7 @@
 
     setOverlayText('Capturing page');
     metrics.warnings = warnings;
+    armWatchdog();
     return { ok: true, metrics };
   }
 
@@ -650,15 +713,25 @@
     const usableW = session.usableWidthCss;
     let box = paneBox();
 
+    const onScreenW = (b) => Math.min(b.left + b.width, usableW) - Math.max(0, b.left);
+
     // Only move the page if the pane is off screen or awkwardly low; a pane
     // already comfortably in view should stay where the user had it.
     if (box.top < 0 || box.top > usableH * 0.4) {
       window.scrollBy(0, box.top - 8);
       box = paneBox();
     }
+    // Horizontally the page used to be left alone entirely, so a pane pushed
+    // off the side of a wide layout measured as one pixel across. The capture
+    // step is derived from that measurement, so it asked for one screenshot per
+    // pixel of the pane's width and appeared to hang for minutes.
+    if (onScreenW(box) < Math.min(box.width, 40)) {
+      window.scrollBy(box.left - 8, 0);
+      box = paneBox();
+    }
     return {
       height: Math.max(1, Math.min(box.top + box.height, usableH) - Math.max(0, box.top)),
-      width: Math.max(1, Math.min(box.left + box.width, usableW) - Math.max(0, box.left)),
+      width: Math.max(1, onScreenW(box)),
     };
   }
 
@@ -723,6 +796,7 @@
   async function goto(msg) {
     if (!session) return { ok: false, error: 'Capture session was lost.' };
     if (session.cancelled) return { ok: false, cancelled: true };
+    armWatchdog();
 
     applyFloatingPolicy(msg.rowIndex, msg.rowCount);
 
@@ -759,6 +833,7 @@
 
   function restore() {
     if (!session) return;
+    clearTimeout(session.watchdog);
 
     session.style?.remove();
     session.overlay?.host.remove();
@@ -770,8 +845,36 @@
     for (const el of session.floating.sticky) el.removeAttribute(STICKY_ATTR);
     for (const { el } of session.floating.fixed) el.removeAttribute(HIDE_ATTR);
 
+    // Innermost first, because putting an outer scroller back can move the
+    // ones inside it.
+    for (const { el, top, left } of session.scrollers) {
+      try {
+        el.scrollTop = top;
+        el.scrollLeft = left;
+      } catch {
+        /* the element may have been replaced by the page since */
+      }
+    }
     window.scrollTo(session.scrollX, session.scrollY);
     session = null;
+  }
+
+  /**
+   * Hand the page back if the extension goes quiet.
+   *
+   * Every mutation here is undone by an FS_RESTORE from the background, and an
+   * MV3 service worker can be terminated at any point, including halfway
+   * through a long capture. Nothing would then ever send that message, and the
+   * page would keep this stylesheet, its hidden banners and the progress card
+   * until it was reloaded. The gap between two messages is normally about a
+   * second, so a minute of silence means the other end is gone.
+   */
+  const WATCHDOG_MS = 60000;
+
+  function armWatchdog() {
+    if (!session) return;
+    clearTimeout(session.watchdog);
+    session.watchdog = setTimeout(restore, WATCHDOG_MS);
   }
 
   api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

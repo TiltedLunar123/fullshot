@@ -231,6 +231,17 @@
     };
   }
 
+  /**
+   * The in-progress or just-finished selection.
+   *
+   * `active` is what separates "the button is down and this rectangle is being
+   * dragged" from "the rectangle is finished and merely still on screen". A
+   * crop selection has to outlive its own pointerup, because it is confirmed
+   * with the Apply button rather than on release, and without the flag every
+   * subsequent mouse movement over the canvas kept redrawing it. Apply then
+   * cropped to wherever the cursor happened to be on its way to the button
+   * instead of to what the user actually drew.
+   */
   let drag = null;
 
   canvas.addEventListener('pointerdown', (event) => {
@@ -240,11 +251,11 @@
       return;
     }
     canvas.setPointerCapture(event.pointerId);
-    drag = { start: toImage(event), current: toImage(event) };
+    drag = { start: toImage(event), current: toImage(event), active: true, pointerId: event.pointerId };
   });
 
   canvas.addEventListener('pointermove', (event) => {
-    if (!drag) return;
+    if (!drag?.active) return;
     drag.current = toImage(event);
     if (tool === 'crop') {
       paintCropOverlay();
@@ -256,13 +267,15 @@
     }
   });
 
-  canvas.addEventListener('pointerup', (event) => {
-    if (!drag) return;
-    canvas.releasePointerCapture(event.pointerId);
+  const endDrag = (event) => {
+    if (!drag?.active) return;
+    if (drag.pointerId === event.pointerId && canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+    drag.active = false;
 
     if (tool === 'crop') {
-      // Crop is confirmed with the Apply button, not on release.
-      drag.pending = true;
+      // Crop is confirmed with the Apply button, so the rectangle stays put.
       return;
     }
 
@@ -275,7 +288,13 @@
     snapshot();
     state.shapes.push(shape);
     render();
-  });
+  };
+
+  canvas.addEventListener('pointerup', endDrag);
+  // A cancelled pointer (the OS taking over, a touch turning into a scroll)
+  // never sends pointerup, and a drag left stuck active would keep following
+  // the cursor.
+  canvas.addEventListener('pointercancel', endDrag);
 
   function shapeFromDrag() {
     if (!drag) return null;
@@ -328,23 +347,26 @@
 
   function applyCrop() {
     if (!drag) return;
-    const x = Math.round(Math.min(drag.start.x, drag.current.x));
-    const y = Math.round(Math.min(drag.start.y, drag.current.y));
-    const w = Math.round(Math.abs(drag.current.x - drag.start.x));
-    const h = Math.round(Math.abs(drag.current.y - drag.start.y));
+
+    // Intersect the drawn rectangle with the image FIRST, then judge whether
+    // what is left is big enough. Clamping the origin without also reducing the
+    // size, which is what this used to do, let a drag that started on the right
+    // edge and continued past it produce a zero-width crop, and a canvas of
+    // width zero throws the moment anything is drawn into it.
+    const left = Math.max(0, Math.round(Math.min(drag.start.x, drag.current.x)));
+    const top = Math.max(0, Math.round(Math.min(drag.start.y, drag.current.y)));
+    const right = Math.min(base.width, Math.round(Math.max(drag.start.x, drag.current.x)));
+    const bottom = Math.min(base.height, Math.round(Math.max(drag.start.y, drag.current.y)));
+
+    const w = right - left;
+    const h = bottom - top;
     if (w < 8 || h < 8) {
       setHint('That crop area is too small.');
       return;
     }
 
     snapshot();
-    // Clamp to the image so a drag past the edge cannot produce empty bands.
-    state.crop = {
-      x: Math.max(0, x),
-      y: Math.max(0, y),
-      w: Math.min(w, base.width - Math.max(0, x)),
-      h: Math.min(h, base.height - Math.max(0, y)),
-    };
+    state.crop = { x: left, y: top, w, h };
     cancelCrop();
     render();
   }
@@ -558,12 +580,23 @@
   async function copyToClipboard() {
     setHint('Copying...');
     try {
+      // Hand ClipboardItem a PROMISE and call write() straight away, rather
+      // than encoding first and writing afterwards.
+      //
+      // Writing to the clipboard is only permitted while the click that asked
+      // for it still counts as user activation, and that lasts a few seconds.
+      // Encoding a full-page screenshot to PNG takes longer than that, so
+      // awaiting the encode first meant Copy worked on small captures and
+      // failed with a permissions error on exactly the large ones this
+      // extension exists to produce. A promise lets the encode finish after
+      // the write has already been authorised.
+      //
       // Clipboard image support is PNG-only in practice.
-      const blob = await toBlob(flatten(), 'image/png');
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      const png = Promise.resolve().then(() => toBlob(flatten(), 'image/png'));
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
       setHint('Copied. Paste it anywhere.');
     } catch (err) {
-      setHint(`Could not copy: ${err?.message ?? err}`);
+      setHint(`Could not copy: ${err?.message ?? err}. Use Save instead.`);
     }
   }
 
@@ -592,7 +625,12 @@
       button.classList.toggle('is-active', button.dataset.tool === next);
     }
     $('.crop-bar').hidden = next !== 'crop';
-    if (next !== 'crop') cropOverlay.hidden = true;
+    if (next !== 'crop') {
+      cropOverlay.hidden = true;
+      // Leaving the crop tool abandons its selection; keeping the rectangle
+      // around would let a later Enter apply a crop the user had moved on from.
+      if (!drag?.active) drag = null;
+    }
     canvas.style.cursor = next === 'move' ? 'default' : next === 'text' ? 'text' : 'crosshair';
   }
 
@@ -655,9 +693,18 @@
     updateHistoryButtons();
     render();
 
-    // The capture is safely decoded into `base` now, so the stored copy is
-    // redundant. Dropping it keeps screenshots from piling up on disk.
-    FS.store.delete(id).catch(() => {});
+    // The stored copy deliberately survives this page.
+    //
+    // It used to be deleted the moment the editor had decoded it, which meant
+    // reloading this tab, or reopening it from history, threw the screenshot
+    // away with no way to get it back. Age is what bounds the store instead,
+    // which is also what the loading message above promises.
+    FS.store.prune().catch(() => {});
+
+    // This capture is on screen now, so the popup should stop offering it.
+    api.storage.local.get('pendingCapture').then(({ pendingCapture }) => {
+      if (pendingCapture?.id === id) api.storage.local.remove('pendingCapture');
+    }, () => {});
   }
 
   /* ---------------------------------------------------------------- */

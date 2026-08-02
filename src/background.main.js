@@ -11,8 +11,15 @@
  * drawn as an in-page overlay instead of in an extension tab.
  */
 
-/** Guards against two captures racing over the same tab's scroll position. */
-const inFlight = new Map();
+/**
+ * The tab currently being captured, or null.
+ *
+ * This is deliberately ONE slot rather than a set keyed by tab. captureVisibleTab
+ * photographs whichever tab is active, so two captures running at once would
+ * photograph each other's pages. Refusing the second one is the only honest
+ * answer.
+ */
+let inFlightTabId = null;
 
 /* ------------------------------------------------------------------ */
 /* Binary helpers                                                      */
@@ -62,7 +69,26 @@ function tell(tabId, message) {
 /* Capture                                                             */
 /* ------------------------------------------------------------------ */
 
-async function captureViewport(windowId, scheduler) {
+/**
+ * Refuse to photograph the wrong page.
+ *
+ * captureVisibleTab takes a picture of whatever tab is active, not of the tab
+ * that was asked for. Switching tabs partway through a long capture therefore
+ * used to splice the new page into the middle of the old one, silently, and a
+ * screenshot that is quietly wrong is worse than one that failed.
+ */
+async function assertStillActive(tabId) {
+  let tab;
+  try {
+    tab = await FS.api.tabs.get(tabId);
+  } catch {
+    throw new Error('The tab being captured was closed.');
+  }
+  if (!tab.active) throw new Error('TAB_SWITCHED');
+}
+
+async function captureViewport(tabId, windowId, scheduler) {
+  await assertStillActive(tabId);
   const dataUrl = await scheduler.run(() =>
     FS.api.tabs.captureVisibleTab(windowId, { format: 'png' })
   );
@@ -81,10 +107,12 @@ async function captureViewport(windowId, scheduler) {
  * asked for, and anything short falls through to scroll-and-stitch. A wrong
  * guess therefore costs one capture, never a broken screenshot.
  */
-async function tryOneShot({ windowId, metrics, scale, scheduler }) {
+async function tryOneShot({ tabId, windowId, metrics, scale, scheduler }) {
   if (!FS.isFirefox) return null;
   const wantW = Math.round(metrics.pageWidthCss * scale);
   const wantH = Math.round(metrics.pageHeightCss * scale);
+
+  await assertStillActive(tabId);
 
   try {
     const dataUrl = await scheduler.run(() =>
@@ -115,6 +143,17 @@ async function tryOneShot({ windowId, metrics, scale, scheduler }) {
   }
 }
 
+/** Drop a canvas's backing store immediately rather than waiting for the GC. */
+function releaseCanvas(canvas) {
+  if (!canvas) return;
+  try {
+    canvas.width = 1;
+    canvas.height = 1;
+  } catch {
+    /* already gone */
+  }
+}
+
 async function runCapture({ tabId, windowId, mode, settings }) {
   const scheduler = new FS.CaptureScheduler();
   const warnings = [];
@@ -126,41 +165,50 @@ async function runCapture({ tabId, windowId, mode, settings }) {
   const metrics = prep.metrics;
   warnings.push(...(metrics.warnings ?? []));
 
-  // Work out the output scale before allocating anything. The canvas is sized
-  // to the REGION being captured, not to the page: sizing it to the page and
-  // then drawing a viewport-sized bitmap into it is what stretches a
-  // visible-area capture.
-  const budget = await FS.canvasBudget.measure();
-  const requested = settings.retina ? metrics.dpr : 1;
-  const fit = FS.plan.fitToBudget({
-    pageWidthCss: metrics.captureWidthCss,
-    pageHeightCss: metrics.captureHeightCss,
-    scale: requested,
-    maxArea: budget.maxArea,
-    maxDimension: budget.maxDimension,
-  });
-  if (fit.downscaled) {
-    warnings.push(
-      `This page is larger than your browser's maximum image size, so it was scaled to ${Math.round(
-        fit.scale * 100
-      )}% to fit. Export as PDF for full resolution.`
-    );
-  }
-
-  const canvas = new OffscreenCanvas(fit.widthPx, fit.heightPx);
-  const ctx = canvas.getContext('2d');
-  // White base: pages with transparent backgrounds otherwise stitch onto black.
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, fit.widthPx, fit.heightPx);
-
+  // Everything from here on runs against a page the agent has already
+  // rearranged, so every exit path has to hand it back. Measuring the canvas
+  // budget and allocating the canvas used to sit outside this guard, which
+  // meant a browser that refused the allocation left the page permanently
+  // scrolled to the top, wearing our progress overlay, with its sticky header
+  // forced static.
+  let canvas = null;
+  let fit = null;
   let sliceCount = 0;
 
   try {
+    // Work out the output scale before allocating anything. The canvas is
+    // sized to the REGION being captured, not to the page: sizing it to the
+    // page and then drawing a viewport-sized bitmap into it is what stretches
+    // a visible-area capture.
+    const budget = await FS.canvasBudget.measure();
+    const requested = settings.retina ? metrics.dpr : 1;
+    fit = FS.plan.fitToBudget({
+      pageWidthCss: metrics.captureWidthCss,
+      pageHeightCss: metrics.captureHeightCss,
+      scale: requested,
+      maxArea: budget.maxArea,
+      maxDimension: budget.maxDimension,
+    });
+    if (fit.downscaled) {
+      warnings.push(
+        `This page is larger than your browser's maximum image size, so it was scaled to ${Math.round(
+          fit.scale * 100
+        )}% to fit. Export as PDF for full resolution.`
+      );
+    }
+
+    canvas = new OffscreenCanvas(fit.widthPx, fit.heightPx);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('This browser would not give Fullshot a canvas big enough for that page.');
+    // White base: pages with transparent backgrounds otherwise stitch onto black.
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, fit.widthPx, fit.heightPx);
+
     // The one-shot path photographs the whole document, so it only applies
     // when the whole document is what was asked for.
     const oneShot =
       mode === 'full'
-        ? await tryOneShot({ windowId, metrics, scale: fit.scale, scheduler })
+        ? await tryOneShot({ tabId, windowId, metrics, scale: fit.scale, scheduler })
         : null;
 
     if (oneShot) {
@@ -179,6 +227,11 @@ async function runCapture({ tabId, windowId, mode, settings }) {
         warnings,
       });
     }
+  } catch (err) {
+    // A full-page canvas can be hundreds of megabytes; do not wait for the
+    // collector to notice that this one is never going to be used.
+    releaseCanvas(canvas);
+    throw err;
   } finally {
     // Always hand the page back the way we found it, even on failure.
     await tell(tabId, { type: 'FS_RESTORE' }).catch(() => {});
@@ -186,8 +239,7 @@ async function runCapture({ tabId, windowId, mode, settings }) {
 
   const blob = await canvas.convertToBlob({ type: 'image/png' });
   // Free the backing store now; a full-page canvas can be hundreds of MB.
-  canvas.width = 1;
-  canvas.height = 1;
+  releaseCanvas(canvas);
 
   return {
     blob,
@@ -252,7 +304,7 @@ async function stitchByScrolling({ tabId, mode, windowId, metrics, fit, ctx, sch
     // region smaller than the viewport.
     if (landed.skip) continue;
 
-    const bitmap = await captureViewport(windowId, scheduler);
+    const bitmap = await captureViewport(tabId, windowId, scheduler);
     await tell(tabId, { type: 'FS_AFTER_SHOT' }).catch(() => {});
 
     const place = FS.plan.placeClip({
@@ -326,8 +378,16 @@ async function start(mode, explicitTabId) {
   const restriction = FS.restrictionFor(tab.url);
   if (restriction) return { ok: false, error: restriction };
 
-  if (inFlight.has(tab.id)) return { ok: false, error: 'A capture is already running on this tab.' };
-  inFlight.set(tab.id, true);
+  if (inFlightTabId !== null) {
+    return {
+      ok: false,
+      error:
+        inFlightTabId === tab.id
+          ? 'A capture is already running on this tab.'
+          : 'A capture is already running on another tab. Screenshots have to be taken one at a time.',
+    };
+  }
+  inFlightTabId = tab.id;
   await setBadge(tab.id, '...');
 
   try {
@@ -339,7 +399,8 @@ async function start(mode, explicitTabId) {
       settings,
     });
 
-    await FS.store.prune();
+    // Housekeeping must never be the reason a finished capture is thrown away.
+    await FS.store.prune().catch(() => {});
     const id = FS.store.newId();
     await FS.store.put({
       id,
@@ -358,19 +419,27 @@ async function start(mode, explicitTabId) {
       await FS.api.tabs.create({
         url: FS.api.runtime.getURL(`editor/editor.html?id=${encodeURIComponent(id)}`),
       });
+    } else {
+      // Nothing opened, so nothing on screen says this worked. Leave a note the
+      // popup can pick up, otherwise a capture taken with the keyboard shortcut
+      // and the editor switched off is indistinguishable from one that failed.
+      await FS.api.storage.local.set({ pendingCapture: { id, at: Date.now() } }).catch(() => {});
     }
-    return { ok: true, id, warnings: result.warnings };
+    return { ok: true, id, editorOpened: Boolean(settings.openEditor), warnings: result.warnings };
   } catch (err) {
     const message = String(err?.message ?? err);
     if (message === 'CANCELLED') return { ok: false, cancelled: true };
     return { ok: false, error: friendlyError(message) };
   } finally {
-    inFlight.delete(tab.id);
+    inFlightTabId = null;
     await setBadge(tab.id, '');
   }
 }
 
 function friendlyError(message) {
+  if (message === 'TAB_SWITCHED') {
+    return 'The tab changed while the screenshot was being taken, so it was stopped before it could photograph the wrong page. Leave the tab in front until it finishes.';
+  }
   if (/Cannot access|Missing host permission|Extension manifest/i.test(message)) {
     return 'Fullshot needs permission for this tab. Click the toolbar button on the page you want to capture.';
   }

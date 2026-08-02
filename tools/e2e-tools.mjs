@@ -337,14 +337,24 @@ async function run() {
 
     await useTool('crop');
     await dragImage([20, 20], [220, 180]);
+
+    // Crossing the canvas on the way to the Apply button must not resize the
+    // selection. Releasing the button ends the drag; the rectangle that is left
+    // on screen is the one Apply has to use. Without that distinction the crop
+    // silently followed the cursor and Apply cropped to wherever it stopped.
+    await cdp.hover(ed, await pt(340, 260));
+    await sleep(120);
+    await cdp.hover(ed, await pt(60, 60));
+    await sleep(120);
+
     await cdp.evaluate(ed, `document.getElementById('crop-apply').click()`);
     await sleep(300);
 
     const cropped = await canvasSize();
     check(
       cropped.w === 200 && cropped.h === 160,
-      `Crop resized the canvas to ${cropped.w}x${cropped.h}`,
-      `Crop gave ${cropped.w}x${cropped.h}, expected 200x160`
+      `Crop used the rectangle that was drawn, not the cursor (${cropped.w}x${cropped.h})`,
+      `Crop gave ${cropped.w}x${cropped.h}, expected 200x160 (did hovering move it?)`
     );
 
     // The box was drawn at image (40,40). After cropping at (20,20) its top

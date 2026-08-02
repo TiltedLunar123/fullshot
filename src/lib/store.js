@@ -40,9 +40,14 @@ FS.store = {
           reject(err);
           return;
         }
-        tx.oncomplete = () => resolve(result?.result ?? result);
+        // An IDBRequest carries its answer on `.result`, and for a miss that
+        // answer is `undefined`. Reaching for the request itself as a fallback,
+        // which `result?.result ?? result` used to do, handed callers a truthy
+        // IDBRequest for a record that does not exist.
+        tx.oncomplete = () =>
+          resolve(result && typeof result === 'object' && 'readyState' in result ? result.result : result);
         tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error ?? new Error('The screenshot store transaction was aborted.'));
       });
     } finally {
       db.close();
@@ -84,6 +89,10 @@ FS.store = {
         };
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error);
+        // Without this an aborted transaction settles nothing, and prune() is
+        // awaited before a finished capture is handed over: the screenshot
+        // would never arrive and the badge would sit on "..." forever.
+        tx.onabort = () => reject(tx.error ?? new Error('The screenshot store transaction was aborted.'));
       });
     } finally {
       db.close();
