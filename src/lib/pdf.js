@@ -38,8 +38,10 @@ FS.pdf = {
       return length;
     };
 
-    // Object 1 is the catalog, 2 the page tree, then three objects per page.
-    const objectCount = 2 + pages.length * 3;
+    // Object 1 is the catalog, 2 the page tree, then three objects per page,
+    // and the document information dictionary last.
+    const objectCount = 3 + pages.length * 3;
+    const infoObjNum = objectCount;
     // offsets[n] is the byte offset of object n. Index 0 is the free entry.
     const offsets = new Array(objectCount + 1).fill(0);
 
@@ -102,6 +104,14 @@ FS.pdf = {
       endObject();
     });
 
+    // The trailer's /Info has to be an indirect reference, not a dictionary
+    // written out in place. Readers vary in how strict they are about it, and
+    // the ones that are strict reject the whole file rather than skip the
+    // metadata.
+    beginObject(infoObjNum);
+    write(`<< /Title (${escapeText(title)}) /Producer (Fullshot) >>\n`);
+    endObject();
+
     // Cross-reference table. Every entry is exactly 20 bytes, including the
     // trailing two-character EOL, or readers reject the file.
     const xrefOffset = length;
@@ -111,10 +121,7 @@ FS.pdf = {
       write(`${String(offsets[n]).padStart(10, '0')} 00000 n \n`);
     }
 
-    write(
-      `trailer\n<< /Size ${objectCount + 1} /Root 1 0 R ` +
-        `/Info << /Title (${escapeText(title)}) /Producer (Fullshot) >> >>\n`
-    );
+    write(`trailer\n<< /Size ${objectCount + 1} /Root 1 0 R /Info ${infoObjNum} 0 R >>\n`);
     write(`startxref\n${xrefOffset}\n%%EOF\n`);
 
     const out = new Uint8Array(length);

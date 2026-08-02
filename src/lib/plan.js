@@ -113,10 +113,19 @@ FS.plan = {
     const srcScaleX = bitmapWidthPx / viewWidthCss;
     const srcScaleY = bitmapHeightPx / viewHeightCss;
 
+    // Round the two EDGES of the slice, then subtract, rather than rounding the
+    // position and the size independently.
+    //
+    // Independent rounding is what puts hairline white seams across a downscaled
+    // capture: at scale 0.36 with an 937px step, slice 1 lands at round(337.32)
+    // = 337 and is round(337.32) = 337 tall, so it ends at row 673, while slice
+    // 2 lands at round(674.64) = 675. Row 674 belongs to neither and stays the
+    // blank canvas underneath. Deriving the size from the rounded edges makes
+    // consecutive slices abut exactly, whatever the scale.
     const destX = Math.round(outXCss * scale);
     const destY = Math.round(outYCss * scale);
-    let destW = Math.round(clip.w * scale);
-    let destH = Math.round(clip.h * scale);
+    let destW = Math.round((outXCss + clip.w) * scale) - destX;
+    let destH = Math.round((outYCss + clip.h) * scale) - destY;
 
     // A tile clamped at the end of the document can reach past the canvas.
     destW -= Math.max(0, destX + destW - canvasWidthPx);

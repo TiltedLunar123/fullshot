@@ -101,10 +101,28 @@ test('object count and page tree agree', () => {
   const text = decode(pdf);
 
   assert.ok(text.includes('/Count 4'), 'page tree must report four pages');
-  // Catalog + page tree + three objects per page.
-  const expected = 2 + 4 * 3;
+  // Catalog + page tree + three objects per page + the document info dict.
+  const expected = 3 + 4 * 3;
   assert.ok(text.includes(`/Size ${expected + 1}`), `trailer /Size should be ${expected + 1}`);
   assert.equal((text.match(/\/Type \/Page\b(?!s)/g) ?? []).length, 4);
+});
+
+test('the trailer references /Info indirectly, as the spec requires', () => {
+  // A dictionary written straight into the trailer parses in lenient readers
+  // and is rejected outright by strict ones, so the difference is a file that
+  // either opens everywhere or nowhere.
+  const pdf = FS.pdf.build([page(), page()], { pageWidthPt: 612, pageHeightPt: 792 });
+  const text = decode(pdf);
+
+  const trailer = text.slice(text.lastIndexOf('trailer'));
+  const ref = /\/Info (\d+) 0 R/.exec(trailer);
+  assert.ok(ref, `trailer must point at an Info object, got: ${trailer.split('\n')[1]}`);
+  assert.ok(!/\/Info <</.test(trailer), 'Info must not be inlined in the trailer');
+
+  // And that object number has to actually exist and hold the metadata.
+  const objectAt = text.indexOf(`${ref[1]} 0 obj`);
+  assert.ok(objectAt > 0, `Info object ${ref[1]} is missing`);
+  assert.ok(text.slice(objectAt, objectAt + 120).includes('/Producer (Fullshot)'));
 });
 
 test('image bytes survive the round trip unmodified', () => {
