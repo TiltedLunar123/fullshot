@@ -1,6 +1,6 @@
 {
   "name": "fullshot",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Full page screenshot extension for Chrome and Firefox. Correct on sticky headers, lazy images and app UIs.",
   "private": true,
   "type": "module",

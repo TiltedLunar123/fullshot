@@ -1,5 +1,73 @@
 # Changelog
 
+## 1.0.3
+
+A sweep for bugs that produce a quietly wrong screenshot rather than an
+obvious failure, plus the editor and cleanup problems found alongside them.
+
+### Capture
+
+- Switching tabs partway through a capture used to splice the new page into
+  the middle of the old one. captureVisibleTab photographs whichever tab is
+  active, not the tab that was asked for, so the second half of a long
+  screenshot could be a completely different site. The capture now stops with
+  an explanation instead. Two captures can no longer run at once for the same
+  reason.
+- Downscaled captures could come back with hairline white lines across them.
+  Each slice's position and its size were rounded separately, so at some
+  combinations of viewport height and scale a row of pixels belonged to
+  neither of two adjacent slices. Slice edges are now rounded together.
+- Picking a fixed-position panel in scrolling panel or element mode returned a
+  picture of whatever was behind it. The panel was being hidden as page
+  furniture, and a hidden element still occupies its layout box, so the
+  capture looked plausible and was wrong. The target and its ancestors are now
+  exempt from the furniture rules.
+- Pages wider than the viewport could return blank right-hand columns. Only
+  the vertical scroll was ever verified, so a page that refused to move
+  sideways still reported success for every column.
+- A panel almost entirely off screen made Fullshot appear to hang. The step
+  size collapsed to a single pixel, which asked for one screenshot per pixel
+  of the panel's width. It now scrolls the panel into view, and says so
+  plainly when it cannot.
+
+### Cleanup and recovery
+
+- A capture that failed while the browser was allocating its canvas left the
+  page rearranged: scrolled to the top, wearing the progress card, with sticky
+  headers forced static and banners hidden. The page is now handed back
+  whatever goes wrong.
+- If the extension's background worker is shut down mid capture, which the
+  browser may do at any time, the page hands itself back after a minute rather
+  than staying rearranged until it is reloaded.
+- Capturing an element or a panel no longer loses your place. The scroll
+  position inside mail threads, chat panes and other inner scrollers is now
+  restored along with the window's.
+
+### Editor
+
+- Cropping used the wrong rectangle. Releasing the mouse ended the drag but not
+  the selection, so moving the pointer across the image on the way to the Apply
+  button dragged the crop along with it and Apply cropped to wherever the
+  cursor stopped.
+- A crop drag that started at the very edge of the image could produce a crop
+  of zero width and break the editor until you undid it.
+- Copy failed on large screenshots. Permission to write to the clipboard
+  expires a few seconds after the click that asked for it, and encoding a full
+  page to PNG takes longer than that, so Copy worked on small captures and
+  failed on exactly the ones this extension exists to produce.
+- Reloading the editor tab no longer throws the screenshot away.
+- With "open the editor after capturing" switched off, a capture went nowhere
+  the user could reach. The popup now offers it.
+- PDF export writes its document information as a separate object, which is
+  what the PDF specification requires. Lenient readers accepted the old files;
+  strict ones rejected them outright.
+
+### Tooling
+
+- The end-to-end suites rebuild the extension before they run. They used to
+  test whatever was last built, so a change to the source could be verified by
+  a suite that had never loaded it.
+
 ## 1.0.2
 
 - Fixed: starting a full page capture while scrolled down could leave the top
