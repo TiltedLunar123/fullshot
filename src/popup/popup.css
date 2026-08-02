@@ -143,6 +143,17 @@ kbd {
   border-top: 1px solid var(--line);
 }
 
+/* The offer to open a capture the editor was not launched for. It sits in the
+   body rather than the footer, so unlike the footer links it reads as an
+   action. */
+#open-capture {
+  display: block;
+  margin: 6px 0 0 4px;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
 .link {
   padding: 2px 4px;
   color: var(--muted);
