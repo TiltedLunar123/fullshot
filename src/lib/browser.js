@@ -9,8 +9,22 @@ globalThis.FS = globalThis.FS || {};
 
 FS.api = typeof browser !== 'undefined' && browser.runtime ? browser : chrome;
 
-/** True on Gecko, where captureVisibleTab may honour an ImageDetails rect. */
-FS.isFirefox = typeof browser !== 'undefined' && !!browser.runtime && !globalThis.chrome?.offscreen;
+/**
+ * True on Gecko, where captureVisibleTab may honour an ImageDetails rect.
+ *
+ * The `browser` global is no longer a Gecko tell: Chromium exposes one as well.
+ * The old tiebreak on `chrome.offscreen` was worse than useless, because that
+ * API only exists when an extension asks for the `offscreen` permission, which
+ * this one never does. Both halves therefore agreed on Chromium and every
+ * Chromium build called itself Firefox.
+ *
+ * `runtime.getBrowserInfo` is Gecko-only, needs no permission, and is not
+ * called here, only looked for.
+ */
+FS.isFirefox =
+  typeof browser !== 'undefined' &&
+  !!browser.runtime &&
+  typeof browser.runtime.getBrowserInfo === 'function';
 
 /**
  * URLs the browser refuses to let extensions script or capture. Detecting these

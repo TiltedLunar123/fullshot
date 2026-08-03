@@ -350,6 +350,9 @@
       if (session) session.cancelled = true;
       setOverlayText('Cancelling...');
     });
+    // See showOverlay: the host must not generate a box of its own, and the
+    // page must not be able to restyle it into one.
+    host.style.setProperty('display', 'contents', 'important');
     document.documentElement.appendChild(host);
     return { host, root };
   }
@@ -366,10 +369,36 @@
     session.overlay.root.querySelector('.label').textContent = text;
   }
 
-  /** The overlay is fixed-position, so it would land in the shot. Hide it. */
+  /**
+   * The overlay is fixed-position, so it would land in the shot. Hide it.
+   *
+   * `!important` because a plain inline `display` still loses to a page rule
+   * like `div { display: block !important }`, and losing that fight means the
+   * card is photographed. `contents` rather than the initial value when shown,
+   * so the host itself never generates a box: it is appended to the document
+   * element, and a card that changes the page's measured height between
+   * measuring and capturing would be read as the page growing underneath us.
+   */
   function showOverlay(visible) {
     if (!session?.overlay) return;
-    session.overlay.host.style.display = visible ? '' : 'none';
+    const { host } = session.overlay;
+    host.style.setProperty('display', visible ? 'contents' : 'none', 'important');
+  }
+
+  /**
+   * Put the card away and wait for the browser to paint without it.
+   *
+   * Sent by the background before every single photograph, whichever capture
+   * path it is taking.
+   */
+  async function hideForShot() {
+    if (!session) return { ok: false, error: 'Capture session was lost.' };
+    armWatchdog();
+    showOverlay(false);
+    // nextFrame is two rAFs, so this returns after a frame has been rendered
+    // with the card already gone.
+    await nextFrame();
+    return { ok: true };
   }
 
   /* ---------------------------------------------------------------- */
@@ -817,15 +846,9 @@
     await nextFrame();
 
     setOverlayProgress(msg.index + 1, msg.total);
-    showOverlay(false);
-    // One more frame so the hidden overlay is actually off-screen when the
-    // browser takes the photograph.
-    await nextFrame();
-
-    if (session.cancelled) {
-      showOverlay(true);
-      return { ok: false, cancelled: true };
-    }
+    // Hiding the card is NOT done here. FS_BEFORE_SHOT owns it, so that every
+    // capture path is covered by the same handshake and none can be forgotten.
+    if (session.cancelled) return { ok: false, cancelled: true };
 
     const placement = session.mode === 'area' ? paneClip() : documentClip();
     return { ok: true, ...placement, pageHeightCss: docHeight() };
@@ -891,6 +914,12 @@
     }
     if (msg.type === 'FS_GOTO') {
       goto(msg)
+        .then(sendResponse)
+        .catch((err) => sendResponse({ ok: false, error: String(err?.message ?? err) }));
+      return true;
+    }
+    if (msg.type === 'FS_BEFORE_SHOT') {
+      hideForShot()
         .then(sendResponse)
         .catch((err) => sendResponse({ ok: false, error: String(err?.message ?? err) }));
       return true;

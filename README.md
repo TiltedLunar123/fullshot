@@ -118,7 +118,7 @@ npm run all        # build, zip, gate and tests
 npm run icons      # re-rasterise the icon PNGs (only after editing icon.svg)
 ```
 
-There are three end-to-end harnesses, all driving a real browser with no test
+There are five end-to-end harnesses, all driving a real browser with no test
 framework.
 
 `npm run e2e` loads the built extension, captures `test-pages/torture.html`, and
@@ -133,6 +133,16 @@ capture is viewport sized and not stretched onto a page-sized canvas, that an
 element captured from the middle of a page contains that element and nothing
 else, and that a scrolling panel is scrolled and stitched across its full content
 with all thirty rows landing at the right height.
+
+`npm run e2e:scroll` captures a page that fights back: it hijacks the wheel, undoes
+programmatic scrolls and moves itself while it is being read.
+
+`npm run e2e:overlay` proves Fullshot never photographs its own progress card. It
+wraps the capture API and asks the page, at the instant of every single photograph,
+whether the card is still up, then checks that a flat-coloured page comes back
+containing nothing but that colour. Asking the page is the point: a path that takes a
+photograph and later discards it still leaks on the browser where that photograph is
+kept, so a pixel check alone would call a broken build clean.
 
 `npm run e2e:tools` drives every editor tool with real synthesised mouse and keyboard
 input and asserts on the resulting canvas: that Move changes nothing, that Box draws a

@@ -87,9 +87,33 @@ async function assertStillActive(tabId) {
   if (!tab.active) throw new Error('TAB_SWITCHED');
 }
 
-async function captureViewport(tabId, windowId, scheduler) {
+/**
+ * Take one photograph, with the page's progress card out of the way.
+ *
+ * EVERY capture goes through here, and that is the point. The card is fixed to
+ * the top right of the viewport, so a photograph taken while it is up paints
+ * extension UI into the user's screenshot. The tiled path used to do the hiding
+ * itself, which left the one-shot path below photographing the page without
+ * ever asking, and on Firefox that photograph is the whole screenshot.
+ *
+ * The hide is deliberately not swallowed: photographing without knowing the
+ * card is down is the exact failure being prevented.
+ */
+async function shoot(tabId, scheduler, take) {
   await assertStillActive(tabId);
-  const dataUrl = await scheduler.run(() =>
+  const ready = await tell(tabId, { type: 'FS_BEFORE_SHOT' });
+  if (!ready?.ok) throw new Error(ready?.error || 'Lost contact with the page.');
+  try {
+    return await scheduler.run(take);
+  } finally {
+    // Put it back so the user can still see progress and reach Cancel. Cleanup
+    // must never be the reason a good capture is thrown away.
+    await tell(tabId, { type: 'FS_AFTER_SHOT' }).catch(() => {});
+  }
+}
+
+async function captureViewport(tabId, windowId, scheduler) {
+  const dataUrl = await shoot(tabId, scheduler, () =>
     FS.api.tabs.captureVisibleTab(windowId, { format: 'png' })
   );
   if (!dataUrl) throw new Error('The browser returned an empty capture.');
@@ -112,10 +136,8 @@ async function tryOneShot({ tabId, windowId, metrics, scale, scheduler }) {
   const wantW = Math.round(metrics.pageWidthCss * scale);
   const wantH = Math.round(metrics.pageHeightCss * scale);
 
-  await assertStillActive(tabId);
-
   try {
-    const dataUrl = await scheduler.run(() =>
+    const dataUrl = await shoot(tabId, scheduler, () =>
       FS.api.tabs.captureVisibleTab(windowId, {
         format: 'png',
         rect: {
@@ -305,7 +327,6 @@ async function stitchByScrolling({ tabId, mode, windowId, metrics, fit, ctx, sch
     if (landed.skip) continue;
 
     const bitmap = await captureViewport(tabId, windowId, scheduler);
-    await tell(tabId, { type: 'FS_AFTER_SHOT' }).catch(() => {});
 
     const place = FS.plan.placeClip({
       outXCss: landed.outX,

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.4
+
+- Fullshot's own progress card could end up in the screenshot, sitting in the
+  top right corner of the image. Two things had to go wrong together. Every
+  browser was being identified as Firefox, because the check relied on a global
+  that Chromium now defines too and on an API that only exists when an
+  extension asks for a permission this one deliberately never asks for. That
+  turned on a Firefox-only shortcut, which takes the whole page in a single
+  photograph, and that shortcut was the one capture path that never told the
+  page to put the card away first. On Firefox the card landed in every
+  full-page screenshot; on Chrome it landed in any page short enough to fit on
+  screen in one go, and cost a wasted photograph on every other page.
+- Hiding the card is now the job of a single step that runs before every
+  photograph, whichever path is taking it, so a new capture path cannot forget
+  to do it. It is also hidden in a way a page's own stylesheet cannot override.
+
 ## 1.0.3
 
 A sweep for bugs that produce a quietly wrong screenshot rather than an
