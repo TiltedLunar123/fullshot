@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Plain</title>
+    <style>
+      /*
+        Deliberately featureless: one flat colour, several viewports tall, no
+        white and no red anywhere. Anything Fullshot paints into the output that
+        is not the page shows up as a foreign pixel, which is the whole point of
+        this fixture. The progress card is white with a #e11d48 bar, so it is
+        unmissable here.
+      */
+      html, body { margin: 0; padding: 0; background: rgb(0, 128, 96); }
+      body { height: 4200px; }
+    </style>
+  </head>
+  <body>
+    <script>
+      window.__plain = { colour: [0, 128, 96] };
+    </script>
+  </body>
+</html>

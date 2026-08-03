@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Plain, short</title>
+    <style>
+      /*
+        The same flat colour as plain.html, but short enough to fit in one
+        viewport. That is what makes the one-shot capture path testable on
+        Chromium: the engine ignores the ImageDetails rect and hands back a
+        viewport-sized image, which for a page this size is the right size, so
+        the one-shot result is accepted and becomes the whole screenshot.
+      */
+      html, body { margin: 0; padding: 0; background: rgb(0, 128, 96); }
+      body { height: 300px; }
+    </style>
+  </head>
+  <body>
+    <script>
+      window.__plain = { colour: [0, 128, 96] };
+    </script>
+  </body>
+</html>
