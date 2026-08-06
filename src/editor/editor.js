@@ -394,7 +394,23 @@
   /* Text tool                                                         */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * Finishes the text box that is currently open, if there is one.
+   *
+   * There is only ONE input element, so opening a second box while the first is
+   * still live left both closures' listeners attached to it, each holding its
+   * own click point. A single Enter then ran both, committing the same string
+   * twice at two different places and pushing two entries onto the history.
+   * Ordinary blur does not save us here: startText calls preventDefault, which
+   * is what stops the opening click from immediately blurring the box, and that
+   * also means a later click on the canvas never blurs it either.
+   */
+  let closeOpenText = null;
+
   function startText(event) {
+    // Committing rather than discarding, to match what moving focus away does.
+    if (closeOpenText) closeOpenText();
+
     // Without this the browser moves focus on mouse-up, which immediately
     // blurs the input being opened here and commits an empty shape before the
     // user has typed a single character.
@@ -420,6 +436,7 @@
 
     const teardown = () => {
       finished = true;
+      closeOpenText = null;
       textInput.hidden = true;
       textInput.removeEventListener('blur', commit);
       textInput.removeEventListener('keydown', onKey);
@@ -452,6 +469,7 @@
       if (e.key === 'Escape') teardown();
     };
 
+    closeOpenText = commit;
     textInput.addEventListener('keydown', onKey);
     // Attach blur only after the current input sequence has settled, so the
     // focus churn from this very click cannot commit an empty shape.

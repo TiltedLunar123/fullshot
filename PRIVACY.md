@@ -24,9 +24,12 @@ Anyone can verify this by running `npm run check` on the source.
 Two things, both in your browser's own extension storage on your own machine:
 
 1. **Your settings.** Capture and export preferences. Never leaves the browser.
-2. **The screenshot you just took.** Held briefly so the editor tab can open it,
-   then deleted as soon as the editor has loaded it. Anything left behind by an
-   interrupted capture is discarded after one day.
+2. **The screenshot you just took.** Held so the editor tab can open it, and
+   kept for up to one day so that reloading the editor, or reopening it from
+   your history, does not throw the screenshot away. Captures older than a day
+   are deleted whenever Fullshot next runs, including when your browser starts.
+   Nothing is kept beyond that, and nothing about the page other than its title
+   and address is recorded alongside it.
 
 Saved screenshots go wherever your browser puts downloads. Fullshot has no
 access to them once they are saved.
@@ -47,7 +50,7 @@ explicitly pointed it at.
 |---|---|
 | `activeTab` | Take the screenshot, on the one tab you invoked it on |
 | `scripting` | Insert the capture agent that scrolls and prepares that page |
-| `storage` | Remember your settings and hold the screenshot until the editor opens it |
+| `storage` | Remember your settings and hold the screenshot for the editor |
 
 ## Changes
 

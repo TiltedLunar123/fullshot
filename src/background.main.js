@@ -568,6 +568,21 @@ FS.api.commands?.onCommand.addListener(async (command) => {
 });
 
 /**
+ * Bound the store by age even if the extension is never used again.
+ *
+ * prune() otherwise only ran off the back of a finished capture or an editor
+ * tab opening, so one screenshot taken and never looked at again sat in
+ * IndexedDB indefinitely, which is not what the privacy policy's one-day
+ * promise says. Both of these events are free: an alarm would need the
+ * `alarms` permission, and the permission set is the product.
+ */
+function pruneQuietly() {
+  FS.store.prune().catch(() => {});
+}
+FS.api.runtime.onStartup?.addListener(pruneQuietly);
+FS.api.runtime.onInstalled?.addListener(pruneQuietly);
+
+/**
  * Exposed so the end-to-end harness can drive a capture directly.
  *
  * Only extension contexts can reach the FS namespace, so this grants a web page
