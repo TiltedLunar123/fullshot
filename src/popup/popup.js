@@ -34,6 +34,9 @@ function offerCapture(id) {
 
 async function start(mode) {
   setBusy(true);
+  // The alarm badge belongs to the failure the user is now looking at, so a new
+  // attempt clears it.
+  api.action?.setBadgeText({ text: '' }).catch(() => {});
   say(mode === 'element' || mode === 'area' ? 'Click what you want to capture...' : 'Working...');
 
   try {
@@ -73,6 +76,23 @@ document.getElementById('options').addEventListener('click', () => {
   api.runtime.openOptionsPage();
   window.close();
 });
+
+// A capture that failed with no popup open had nowhere to say so: the keyboard
+// shortcuts have no popup at all, and the element and panel pickers close it.
+// The background parks the message here instead.
+(async () => {
+  try {
+    const { lastError } = await api.storage.local.get('lastError');
+    await api.storage.local.remove('lastError');
+    if (!lastError?.message) return;
+    // Anything older than a few minutes belongs to a session the user has
+    // stopped thinking about, and repeating it now would just be confusing.
+    if (Date.now() - (lastError.at ?? 0) > 5 * 60 * 1000) return;
+    say(lastError.message, true);
+  } catch {
+    /* no parked error is the normal case */
+  }
+})();
 
 // A capture taken with the keyboard shortcut while the editor was switched off
 // has no window of its own, so this is the only place it can be offered.
