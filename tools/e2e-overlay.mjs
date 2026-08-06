@@ -361,7 +361,11 @@ async function run() {
     const visible = await cdp.evaluate(workerSession, `FS.startCapture('visible', ${tabId})`);
     if (!visible?.ok) throw new Error(`visible capture failed: ${visible?.error}`);
     const visibleShots = await cdp.evaluate(workerSession, 'globalThis.__shots');
-    if (visibleShots.every((s) => s === 'hidden' || s === 'absent')) {
+    // A capture that photographed nothing at all would satisfy `every` on an
+    // empty array, so the count has to be asserted before the contents are.
+    if (!visibleShots.length) {
+      fail('visible area: the spy recorded no photographs, so this proves nothing');
+    } else if (visibleShots.every((s) => s === 'hidden' || s === 'absent')) {
       pass(`visible area: overlay was down for all ${visibleShots.length} photographs`);
     } else {
       fail(`visible area: overlay was up for a photograph (${JSON.stringify(visibleShots)})`);

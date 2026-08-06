@@ -320,7 +320,7 @@ async function run() {
 
     const { result: element, point: blockPoint } = await captureWithPick('element', blockExpr);
     if (!element?.ok) {
-      fail(`Element capture failed: ${element?.error ?? element?.cancelled ? 'picker cancelled' : 'unknown'}`);
+      fail(`Element capture failed: ${element?.error ?? (element?.cancelled ? 'picker cancelled' : 'unknown')}`);
     } else {
       const eShot = await cdp.evaluate(control, INSPECT(element.id));
       const expEH = Math.round(blockPoint.height * geometry.dpr);
