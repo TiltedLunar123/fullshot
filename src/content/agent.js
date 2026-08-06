@@ -421,6 +421,32 @@
     return chain;
   }
 
+  /**
+   * Does this element follow the viewport rather than the document?
+   *
+   * A fixed element has no document position. Its rect says where it is on
+   * screen, and it stays there when the page scrolls, so turning that rect into
+   * a document coordinate by adding the scroll offset names a row of the
+   * document the element is not on. Scrolling there then moves the page while
+   * leaving the element exactly where it was, and the capture takes whatever
+   * the viewport now shows at that spot instead.
+   *
+   * Ancestors count: fixed positioning is inherited by containment, not by
+   * style, so a button inside a fixed toolbar is viewport-anchored too.
+   */
+  function isViewportAnchored(el) {
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      let cs;
+      try {
+        cs = getComputedStyle(n);
+      } catch {
+        return false;
+      }
+      if (cs.position === 'fixed') return true;
+    }
+    return false;
+  }
+
   function nearestScrollable(start) {
     for (let el = start; el && el !== document.body; el = el.parentElement) {
       const cs = getComputedStyle(el);
@@ -533,6 +559,7 @@
       overlay: null,
       target: null,
       mode,
+      viewportAnchored: false,
       region: null,
       usableWidthCss: 1,
       usableHeightCss: 1,
@@ -625,12 +652,44 @@
       // The element's box in DOCUMENT coordinates. Measured now, after
       // priming, because loading images can move things.
       const rect = session.target.getBoundingClientRect();
-      region = {
-        x: Math.max(0, rect.left + window.scrollX),
-        y: Math.max(0, rect.top + window.scrollY),
-        w: Math.max(1, Math.round(rect.width)),
-        h: Math.max(1, Math.round(rect.height)),
-      };
+      session.viewportAnchored = isViewportAnchored(session.target);
+
+      if (session.viewportAnchored) {
+        // Anchored to the window, so it is only ever as large as the part of it
+        // on screen, and the page must not be scrolled underneath it. Recording
+        // the region at the CURRENT scroll position keeps one formula in
+        // documentClip working for every mode; goto simply leaves the page
+        // where it is.
+        const left = Math.max(0, rect.left);
+        const top = Math.max(0, rect.top);
+        const right = Math.min(usableWidthCss, rect.right);
+        const bottom = Math.min(usableHeightCss, rect.bottom);
+        if (right - left < 1 || bottom - top < 1) {
+          restore();
+          return {
+            ok: false,
+            error: 'That element is pinned to the window but is not on screen, so there is nothing to capture.',
+          };
+        }
+        if (bottom - top < rect.height - 1 || right - left < rect.width - 1) {
+          warnings.push(
+            'That element is pinned to the window and is larger than the window, so only the part on screen could be captured.'
+          );
+        }
+        region = {
+          x: window.scrollX + left,
+          y: window.scrollY + top,
+          w: Math.max(1, Math.round(right - left)),
+          h: Math.max(1, Math.round(bottom - top)),
+        };
+      } else {
+        region = {
+          x: Math.max(0, rect.left + window.scrollX),
+          y: Math.max(0, rect.top + window.scrollY),
+          w: Math.max(1, Math.round(rect.width)),
+          h: Math.max(1, Math.round(rect.height)),
+        };
+      }
     } else if (mode === 'area') {
       const el = session.target;
       el.scrollTop = 0;
@@ -834,7 +893,7 @@
       session.target.scrollLeft = msg.x;
       await nextFrame();
       bringPaneIntoView();
-    } else if (session.mode !== 'visible') {
+    } else if (session.mode !== 'visible' && !session.viewportAnchored) {
       // Targets arrive in output space, so shift them by the region origin.
       await scrollWindowTo(session.region.x + msg.x, session.region.y + msg.y);
     }

@@ -356,6 +356,44 @@ async function run() {
       );
     }
 
+    /* ---- element, fixed position --------------------------------- */
+    // A fixed element does not live at a document coordinate, so turning its
+    // viewport rect into one by adding the scroll offset names a place it is
+    // not. Scrolling to that place then leaves the element exactly where it
+    // already was and the capture takes whatever the viewport now shows there.
+    // The cookie banner is 90px down and bright yellow, so a capture of the
+    // wrong strip is unmistakable.
+    await scrollTo(1400);
+
+    const bannerExpr = `(() => {
+      const el = document.getElementById('cookie-banner');
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
+               width: Math.round(r.width), height: Math.round(r.height) };
+    })()`;
+
+    const { result: banner, point: bannerPoint } = await captureWithPick('element', bannerExpr);
+    if (!banner?.ok) {
+      fail(`Fixed element capture failed: ${banner?.error ?? (banner?.cancelled ? 'picker cancelled' : 'unknown')}`);
+    } else {
+      const bShot = await cdp.evaluate(control, INSPECT(banner.id));
+      console.log(`fixed element: ${bShot.width}x${bShot.height}, banner is ${bannerPoint.width}x${bannerPoint.height} css`);
+
+      // #facc15. Sample inside the banner's padding, away from its rounded
+      // corners and its text.
+      const samples = await Promise.all(
+        [0.25, 0.5, 0.75].map((f) =>
+          cdp.evaluate(control, SAMPLE(Math.floor(bShot.width * 0.5), Math.floor(bShot.height * f)))
+        )
+      );
+      const yellow = samples.filter((s) => s[0] === 250 && s[1] === 204 && s[2] === 21).length;
+      check(
+        yellow >= 2,
+        `Fixed element capture is the banner itself (rgb ${samples[1]})`,
+        `Fixed element capture shows the wrong part of the page: got ${JSON.stringify(samples)}, expected rgb 250,204,21`
+      );
+    }
+
     /* ---- area (scrolling panel) ---------------------------------- */
     // The pane sits below all twenty blocks, so scroll near the bottom.
     await cdp.evaluate(page, `document.getElementById('inner-pane').scrollTop = 0; true`);
