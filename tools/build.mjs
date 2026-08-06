@@ -50,7 +50,19 @@ const STATIC_DIRS = ['content', 'popup', 'options', 'editor', 'icons', 'lib'];
  * rather than by discipline.
  */
 const ALLOWED_PERMISSIONS = ['activeTab', 'scripting', 'storage'];
-const FORBIDDEN_MANIFEST_KEYS = ['host_permissions', 'content_scripts', 'externally_connectable'];
+/**
+ * `optional_permissions` and `optional_host_permissions` are on this list
+ * because the gate only ever read `permissions`. Anything declared as optional
+ * still appears on the store listing and can be granted later, so the promise
+ * that this extension cannot read your browsing would have been quietly untrue.
+ */
+const FORBIDDEN_MANIFEST_KEYS = [
+  'host_permissions',
+  'optional_permissions',
+  'optional_host_permissions',
+  'content_scripts',
+  'externally_connectable',
+];
 
 const args = new Set(process.argv.slice(2));
 

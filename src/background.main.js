@@ -61,8 +61,27 @@ async function ensureAgent(tabId) {
   });
 }
 
-function tell(tabId, message) {
-  return FS.api.tabs.sendMessage(tabId, message);
+/**
+ * Ask the page something, and give up rather than wait for ever.
+ *
+ * FS_PREPARE, FS_GOTO and FS_BEFORE_SHOT all await an animation frame, and a
+ * minimised or fully occluded tab stops producing them. sendMessage does not
+ * time out on its own, so the reply simply never arrived: the capture hung, the
+ * one in-flight slot stayed taken, and every later capture was refused with "a
+ * capture is already running" until the worker happened to be recycled.
+ *
+ * Waiting for the frame is deliberately not skipped. The frame is the proof
+ * that the progress card is off screen, and photographing without it is how the
+ * card ended up in people's screenshots. Failing loudly is the right answer.
+ */
+function tell(tabId, message, timeoutMs = 30000) {
+  let timer;
+  return Promise.race([
+    FS.api.tabs.sendMessage(tabId, message),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('PAGE_UNRESPONSIVE')), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 /* ------------------------------------------------------------------ */
@@ -476,6 +495,9 @@ function friendlyError(message) {
   }
   if (/Cannot access|Missing host permission|Extension manifest/i.test(message)) {
     return 'Fullshot needs permission for this tab. Click the toolbar button on the page you want to capture.';
+  }
+  if (message === 'PAGE_UNRESPONSIVE') {
+    return 'The page stopped responding, which usually means the window was minimised or hidden behind another one. Leave the tab on screen while the screenshot is taken.';
   }
   if (/Receiving end does not exist|Could not establish connection/i.test(message)) {
     return 'The page reloaded during capture. Try again once it has finished loading.';

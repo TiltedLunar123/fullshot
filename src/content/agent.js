@@ -398,6 +398,12 @@
     // nextFrame is two rAFs, so this returns after a frame has been rendered
     // with the card already gone.
     await nextFrame();
+    // The session can end during that frame: the watchdog can fire, the page
+    // can be navigated away, or the user can cancel. restore() puts the page
+    // back the way they had it, overlay included, so answering "ready" now
+    // would have the background photograph a page that is no longer prepared
+    // and is wearing our card again.
+    if (!session) return { ok: false, error: 'Capture session was lost.' };
     return { ok: true };
   }
 
@@ -513,7 +519,17 @@
           height: `${r.height}px`,
         });
       };
+      // A page is free to swallow click and keydown in a capturing listener of
+      // its own, and some do. There would then be no way to finish or cancel
+      // the pick: this promise never settles, the background sits waiting on
+      // FS_PREPARE, and its one in-flight slot is held for ever, so every later
+      // capture is refused with "a capture is already running". Give up rather
+      // than wedge the extension.
+      const PICK_TIMEOUT_MS = 120000;
+      let timer = null;
+
       const cleanup = () => {
+        clearTimeout(timer);
         document.removeEventListener('mousemove', onMove, true);
         document.removeEventListener('click', onClick, true);
         document.removeEventListener('keydown', onKey, true);
@@ -536,6 +552,10 @@
       document.addEventListener('mousemove', onMove, true);
       document.addEventListener('click', onClick, true);
       document.addEventListener('keydown', onKey, true);
+      timer = setTimeout(() => {
+        cleanup();
+        resolve(null);
+      }, PICK_TIMEOUT_MS);
     });
   }
 
@@ -545,6 +565,14 @@
 
   async function prepare(mode, settings) {
     const warnings = [];
+
+    // A session already in flight means the last capture never got its
+    // FS_RESTORE. An MV3 worker can be killed mid-capture and come back with no
+    // memory of what it was doing, so the user simply starts another one.
+    // Overwriting the session reference orphaned everything the old one owned:
+    // its overlay, its stylesheet, its hidden attributes and its watchdog, none
+    // of which anything could reach again.
+    if (session) restore();
 
     session = {
       settings,
@@ -755,6 +783,16 @@
         );
       }
     }
+
+    // Apply the policy once here, as if the whole capture were a single frame.
+    //
+    // FS_GOTO is what normally applies it, per row, and it re-applies before
+    // the first photograph so this costs the tiled path nothing. But Gecko's
+    // one-shot path photographs the entire document without ever sending an
+    // FS_GOTO, so the policy was never applied there at all and "Hide
+    // completely" did nothing on Firefox. Doing it here covers any capture path
+    // that takes a picture without walking the page, including future ones.
+    applyFloatingPolicy(0, 1);
 
     setOverlayText('Capturing page');
     metrics.warnings = warnings;
