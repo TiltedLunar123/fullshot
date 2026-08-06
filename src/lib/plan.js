@@ -73,7 +73,13 @@ FS.plan = {
 
     return {
       scale: effective,
-      downscaled: effective < scale - 1e-9,
+      // A budget limit is the only thing that counts as a downscale, which is
+      // exactly what `reasons` records. Comparing the final scale against the
+      // requested one instead also caught this rounding, so any device pixel
+      // ratio with more than two decimals, which is what an ordinary Windows
+      // display scale combined with browser zoom produces, put a warning about
+      // the browser's maximum image size on a perfectly normal page.
+      downscaled: reasons.length > 0,
       reasons,
       widthPx: Math.max(1, Math.floor(pageWidthCss * effective)),
       heightPx: Math.max(1, Math.floor(pageHeightCss * effective)),
