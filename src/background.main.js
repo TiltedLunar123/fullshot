@@ -428,7 +428,10 @@ async function start(mode, explicitTabId) {
       : (await FS.api.tabs.query({ active: true, currentWindow: true }))[0];
   if (!tab) return { ok: false, error: 'No active tab.' };
 
-  const restriction = FS.restrictionFor(tab.url);
+  // Only ask the browser about file access when the answer can change the
+  // outcome. It is a round trip, and no ordinary page has any use for it.
+  const fileAccess = FS.isFileUrl(tab.url) && (await FS.canAccessFiles());
+  const restriction = FS.restrictionFor(tab.url, fileAccess);
   if (restriction) return { ok: false, error: restriction };
 
   if (inFlightTabId !== null) {
