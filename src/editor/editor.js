@@ -685,7 +685,23 @@
   /* Boot                                                              */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * The side panel only makes sense once there is an image.
+   *
+   * Every control in it reaches for `base`, so while the editor was showing
+   * "that screenshot is no longer available" the buttons underneath were still
+   * live: Save and Copy answered with a raw TypeError in place of a hint, and
+   * ticking Sharpen text threw with nothing shown at all. The coffee link is an
+   * anchor, so it is untouched by this.
+   */
+  function setPanelEnabled(on) {
+    for (const el of document.querySelectorAll('.panel button, .panel input, .panel select')) {
+      el.disabled = !on;
+    }
+  }
+
   async function boot() {
+    setPanelEnabled(false);
     const id = new URLSearchParams(location.search).get('id');
     if (!id) {
       $('#loading').textContent = 'No screenshot was requested.';
@@ -700,6 +716,7 @@
     }
 
     base = await createImageBitmap(record.blob);
+    setPanelEnabled(true);
     $('#loading').hidden = true;
     wrap.hidden = false;
 
@@ -784,6 +801,20 @@
   });
   $('#quality').addEventListener('input', () => {
     $('#quality-out').value = $('#quality').value;
+  });
+  // This slider is the ONLY place the JPEG quality can be set: the settings page
+  // has no control for it. Without writing the value back it was read on every
+  // export and never stored, so it sat on its default for ever and moving the
+  // slider was forgotten the moment the tab closed.
+  $('#quality').addEventListener('change', async () => {
+    try {
+      const { settings } = await api.storage.local.get('settings');
+      await api.storage.local.set({
+        settings: { ...(settings ?? {}), jpegQuality: Number($('#quality').value) },
+      });
+    } catch {
+      /* a preference that will not save is not worth interrupting an export for */
+    }
   });
 
   const SHORTCUTS = { v: 'move', c: 'crop', r: 'box', a: 'arrow', t: 'text', b: 'redact', p: 'pixelate' };
