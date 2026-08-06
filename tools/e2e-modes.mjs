@@ -320,7 +320,7 @@ async function run() {
 
     const { result: element, point: blockPoint } = await captureWithPick('element', blockExpr);
     if (!element?.ok) {
-      fail(`Element capture failed: ${element?.error ?? element?.cancelled ? 'picker cancelled' : 'unknown'}`);
+      fail(`Element capture failed: ${element?.error ?? (element?.cancelled ? 'picker cancelled' : 'unknown')}`);
     } else {
       const eShot = await cdp.evaluate(control, INSPECT(element.id));
       const expEH = Math.round(blockPoint.height * geometry.dpr);
@@ -353,6 +353,44 @@ async function run() {
         allMatch,
         `Element capture contains block ${blockIndex} and nothing else (rgb ${samples[0]})`,
         `Element capture shows the wrong content: got ${JSON.stringify(samples)}, expected rgb ${expected}`
+      );
+    }
+
+    /* ---- element, fixed position --------------------------------- */
+    // A fixed element does not live at a document coordinate, so turning its
+    // viewport rect into one by adding the scroll offset names a place it is
+    // not. Scrolling to that place then leaves the element exactly where it
+    // already was and the capture takes whatever the viewport now shows there.
+    // The cookie banner is 90px down and bright yellow, so a capture of the
+    // wrong strip is unmistakable.
+    await scrollTo(1400);
+
+    const bannerExpr = `(() => {
+      const el = document.getElementById('cookie-banner');
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
+               width: Math.round(r.width), height: Math.round(r.height) };
+    })()`;
+
+    const { result: banner, point: bannerPoint } = await captureWithPick('element', bannerExpr);
+    if (!banner?.ok) {
+      fail(`Fixed element capture failed: ${banner?.error ?? (banner?.cancelled ? 'picker cancelled' : 'unknown')}`);
+    } else {
+      const bShot = await cdp.evaluate(control, INSPECT(banner.id));
+      console.log(`fixed element: ${bShot.width}x${bShot.height}, banner is ${bannerPoint.width}x${bannerPoint.height} css`);
+
+      // #facc15. Sample inside the banner's padding, away from its rounded
+      // corners and its text.
+      const samples = await Promise.all(
+        [0.25, 0.5, 0.75].map((f) =>
+          cdp.evaluate(control, SAMPLE(Math.floor(bShot.width * 0.5), Math.floor(bShot.height * f)))
+        )
+      );
+      const yellow = samples.filter((s) => s[0] === 250 && s[1] === 204 && s[2] === 21).length;
+      check(
+        yellow >= 2,
+        `Fixed element capture is the banner itself (rgb ${samples[1]})`,
+        `Fixed element capture shows the wrong part of the page: got ${JSON.stringify(samples)}, expected rgb 250,204,21`
       );
     }
 
@@ -411,6 +449,107 @@ async function run() {
       );
 
       if (aShot.warnings?.length) console.log(`area warnings: ${aShot.warnings.join(' | ')}`);
+    }
+
+    /* ---- area, pane TALLER than the window ------------------------ */
+    // The pane above is smaller than the viewport, so its own scrollTop can
+    // reach every row. A pane taller than the window cannot: once scrollTop is
+    // at its maximum the last screenful of content is sitting at the bottom of
+    // the pane's box, off screen below, and asking for more simply clamps. Runs
+    // last, and on its own page, so it cannot disturb anything above.
+    await cdp.send('Page.navigate', { url: `http://127.0.0.1:${fixturePort}/tall-pane.html` }, page);
+    await waitFor('tall pane fixture', async () => cdp.evaluate(page, `window.__tallPane ?? null`));
+    const tall = await cdp.evaluate(page, `window.__tallPane`);
+    console.log(`tall pane: client ${tall.clientHeight}, scrollHeight ${tall.scrollHeight}, rows ${tall.rows}`);
+    await scrollTo(0);
+
+    const tallExpr = `(() => {
+      const el = document.getElementById('pane');
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left + 20), y: Math.round(r.top + 20) };
+    })()`;
+
+    const { result: tallArea } = await captureWithPick('area', tallExpr);
+    if (!tallArea?.ok) {
+      fail(`Tall panel capture failed: ${tallArea?.error ?? (tallArea?.cancelled ? 'picker cancelled' : 'unknown')}`);
+    } else {
+      const tShot = await cdp.evaluate(control, INSPECT(tallArea.id));
+      const expTH = Math.round(tall.scrollHeight * geometry.dpr);
+      console.log(`tall area: ${tShot.width}x${tShot.height}, expected height ~${expTH}`);
+
+      const tallRows = [];
+      for (let i = 0; i < tall.rows; i++) {
+        const y = (i * tall.rowHeight + tall.rowHeight / 2) * geometry.dpr;
+        if (y >= tShot.height) {
+          tallRows.push({ i, missing: true });
+          continue;
+        }
+        const [r, g, b] = await cdp.evaluate(control, SAMPLE(8, y));
+        tallRows.push({ i, r, g, b, ok: r === i * 8 && g === 90 && b === 160 });
+      }
+      const badTall = tallRows.filter((s) => !s.ok);
+      check(
+        badTall.length === 0,
+        `Every row of a pane taller than the window was captured (${tall.rows} rows, pane box ${tall.clientHeight}px)`,
+        `${badTall.length} row(s) of the tall pane wrong: ` +
+          badTall
+            .slice(0, 6)
+            .map((s) => (s.missing ? `#${s.i} missing` : `#${s.i} rgb(${s.r},${s.g},${s.b}) want rgb(${s.i * 8},90,160)`))
+            .join(', ')
+      );
+    }
+    /* ---- wide pages, left to right and right to left -------------- */
+    // Nothing else in test-pages is wider than the viewport, so the multi-column
+    // tile grid and the horizontal scroll read-back had no coverage at all. The
+    // right-to-left run is the interesting one: such a page scrolls from a
+    // negative offset up to zero, not from zero up to a positive one.
+    for (const rtl of [false, true]) {
+      const label = rtl ? 'right to left' : 'left to right';
+      await cdp.send(
+        'Page.navigate',
+        { url: `http://127.0.0.1:${fixturePort}/wide-page.html${rtl ? '?rtl=1' : ''}` },
+        page
+      );
+      await waitFor(`wide fixture (${label})`, async () => cdp.evaluate(page, `window.__widePage ?? null`));
+      const wide = await cdp.evaluate(page, `window.__widePage`);
+      console.log(`wide page (${label}): ${wide.pageWidth}px across a ${wide.clientWidth}px viewport`);
+
+      const capture = await cdp.evaluate(sw, `FS.startCapture('full', ${tabId})`);
+      if (!capture?.ok) {
+        fail(`Wide ${label} capture failed: ${capture?.error ?? 'unknown'}`);
+        continue;
+      }
+      const wShot = await cdp.evaluate(control, INSPECT(capture.id));
+      console.log(`wide ${label}: ${wShot.width}x${wShot.height}, expected width ~${Math.round(wide.pageWidth * geometry.dpr)}`);
+
+      // Sample the middle of every column, a quarter of the way down. Not
+      // halfway: each column's label is a single line centred vertically, so
+      // the midpoint lands on white glyphs rather than on the column's colour.
+      const sampleY = Math.floor(wShot.height * 0.25);
+      const cols = [];
+      for (let i = 0; i < wide.columns; i++) {
+        const x = (i * wide.columnWidth + wide.columnWidth / 2) * geometry.dpr;
+        if (x >= wShot.width) {
+          cols.push({ i, missing: true });
+          continue;
+        }
+        // A screenshot has to look like the page. The columns are flex items, so
+        // laying the page out right to left puts column 0 at the RIGHT: the
+        // correct image is the mirrored order, not the source order.
+        const want = (rtl ? wide.columns - 1 - i : i) * 8;
+        const [r, g, b] = await cdp.evaluate(control, SAMPLE(x, sampleY));
+        cols.push({ i, want, r, g, b, ok: r === want && g === 120 && b === 60 });
+      }
+      const badCols = cols.filter((c) => !c.ok);
+      check(
+        badCols.length === 0,
+        `Every column of a ${label} page wider than the viewport was captured (${wide.columns} columns)`,
+        `${badCols.length} column(s) wrong on the ${label} page: ` +
+          badCols
+            .slice(0, 6)
+            .map((c) => (c.missing ? `#${c.i} missing` : `#${c.i} rgb(${c.r},${c.g},${c.b}) want rgb(${c.want},120,60)`))
+            .join(', ')
+      );
     }
   } finally {
     fixtureServer.close();

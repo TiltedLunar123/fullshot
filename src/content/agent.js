@@ -55,6 +55,28 @@
     );
   }
 
+  /**
+   * The leftmost scroll offset this document can actually reach.
+   *
+   * A page laid out right to left scrolls from a NEGATIVE offset up to zero,
+   * rather than from zero up to a positive one. Tiling from zero rightwards
+   * therefore asks for positions that do not exist: every column past the first
+   * clamps to the same place, and the stitch comes back with the page's columns
+   * in the wrong order.
+   *
+   * Probed rather than read off `dir`, because what matters is the scroll range
+   * the engine actually offers, and an inner element or a writing-mode can put
+   * the origin somewhere `dir` does not describe.
+   */
+  function leftmostScrollX() {
+    if (docWidth() <= window.innerWidth + 1) return 0;
+    const had = window.scrollX;
+    window.scrollTo(-1e7, window.scrollY);
+    const leftmost = Math.min(0, window.scrollX);
+    window.scrollTo(had, window.scrollY);
+    return leftmost;
+  }
+
   function measure() {
     return {
       pageWidthCss: docWidth(),
@@ -398,6 +420,12 @@
     // nextFrame is two rAFs, so this returns after a frame has been rendered
     // with the card already gone.
     await nextFrame();
+    // The session can end during that frame: the watchdog can fire, the page
+    // can be navigated away, or the user can cancel. restore() puts the page
+    // back the way they had it, overlay included, so answering "ready" now
+    // would have the background photograph a page that is no longer prepared
+    // and is wearing our card again.
+    if (!session) return { ok: false, error: 'Capture session was lost.' };
     return { ok: true };
   }
 
@@ -419,6 +447,32 @@
       chain.push({ el: n, top: n.scrollTop, left: n.scrollLeft });
     }
     return chain;
+  }
+
+  /**
+   * Does this element follow the viewport rather than the document?
+   *
+   * A fixed element has no document position. Its rect says where it is on
+   * screen, and it stays there when the page scrolls, so turning that rect into
+   * a document coordinate by adding the scroll offset names a row of the
+   * document the element is not on. Scrolling there then moves the page while
+   * leaving the element exactly where it was, and the capture takes whatever
+   * the viewport now shows at that spot instead.
+   *
+   * Ancestors count: fixed positioning is inherited by containment, not by
+   * style, so a button inside a fixed toolbar is viewport-anchored too.
+   */
+  function isViewportAnchored(el) {
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      let cs;
+      try {
+        cs = getComputedStyle(n);
+      } catch {
+        return false;
+      }
+      if (cs.position === 'fixed') return true;
+    }
+    return false;
   }
 
   function nearestScrollable(start) {
@@ -487,7 +541,17 @@
           height: `${r.height}px`,
         });
       };
+      // A page is free to swallow click and keydown in a capturing listener of
+      // its own, and some do. There would then be no way to finish or cancel
+      // the pick: this promise never settles, the background sits waiting on
+      // FS_PREPARE, and its one in-flight slot is held for ever, so every later
+      // capture is refused with "a capture is already running". Give up rather
+      // than wedge the extension.
+      const PICK_TIMEOUT_MS = 120000;
+      let timer = null;
+
       const cleanup = () => {
+        clearTimeout(timer);
         document.removeEventListener('mousemove', onMove, true);
         document.removeEventListener('click', onClick, true);
         document.removeEventListener('keydown', onKey, true);
@@ -510,6 +574,10 @@
       document.addEventListener('mousemove', onMove, true);
       document.addEventListener('click', onClick, true);
       document.addEventListener('keydown', onKey, true);
+      timer = setTimeout(() => {
+        cleanup();
+        resolve(null);
+      }, PICK_TIMEOUT_MS);
     });
   }
 
@@ -519,6 +587,14 @@
 
   async function prepare(mode, settings) {
     const warnings = [];
+
+    // A session already in flight means the last capture never got its
+    // FS_RESTORE. An MV3 worker can be killed mid-capture and come back with no
+    // memory of what it was doing, so the user simply starts another one.
+    // Overwriting the session reference orphaned everything the old one owned:
+    // its overlay, its stylesheet, its hidden attributes and its watchdog, none
+    // of which anything could reach again.
+    if (session) restore();
 
     session = {
       settings,
@@ -533,6 +609,7 @@
       overlay: null,
       target: null,
       mode,
+      viewportAnchored: false,
       region: null,
       usableWidthCss: 1,
       usableHeightCss: 1,
@@ -625,12 +702,44 @@
       // The element's box in DOCUMENT coordinates. Measured now, after
       // priming, because loading images can move things.
       const rect = session.target.getBoundingClientRect();
-      region = {
-        x: Math.max(0, rect.left + window.scrollX),
-        y: Math.max(0, rect.top + window.scrollY),
-        w: Math.max(1, Math.round(rect.width)),
-        h: Math.max(1, Math.round(rect.height)),
-      };
+      session.viewportAnchored = isViewportAnchored(session.target);
+
+      if (session.viewportAnchored) {
+        // Anchored to the window, so it is only ever as large as the part of it
+        // on screen, and the page must not be scrolled underneath it. Recording
+        // the region at the CURRENT scroll position keeps one formula in
+        // documentClip working for every mode; goto simply leaves the page
+        // where it is.
+        const left = Math.max(0, rect.left);
+        const top = Math.max(0, rect.top);
+        const right = Math.min(usableWidthCss, rect.right);
+        const bottom = Math.min(usableHeightCss, rect.bottom);
+        if (right - left < 1 || bottom - top < 1) {
+          restore();
+          return {
+            ok: false,
+            error: 'That element is pinned to the window but is not on screen, so there is nothing to capture.',
+          };
+        }
+        if (bottom - top < rect.height - 1 || right - left < rect.width - 1) {
+          warnings.push(
+            'That element is pinned to the window and is larger than the window, so only the part on screen could be captured.'
+          );
+        }
+        region = {
+          x: window.scrollX + left,
+          y: window.scrollY + top,
+          w: Math.max(1, Math.round(right - left)),
+          h: Math.max(1, Math.round(bottom - top)),
+        };
+      } else {
+        region = {
+          x: Math.max(0, rect.left + window.scrollX),
+          y: Math.max(0, rect.top + window.scrollY),
+          w: Math.max(1, Math.round(rect.width)),
+          h: Math.max(1, Math.round(rect.height)),
+        };
+      }
     } else if (mode === 'area') {
       const el = session.target;
       el.scrollTop = 0;
@@ -667,7 +776,12 @@
         warnings.push('That panel does not scroll, so it was captured as it appears.');
       }
     } else {
-      region = { x: 0, y: 0, w: metrics.pageWidthCss, h: metrics.pageHeightCss };
+      region = {
+        x: leftmostScrollX(),
+        y: 0,
+        w: metrics.pageWidthCss,
+        h: metrics.pageHeightCss,
+      };
     }
 
     session.region = region;
@@ -696,6 +810,16 @@
         );
       }
     }
+
+    // Apply the policy once here, as if the whole capture were a single frame.
+    //
+    // FS_GOTO is what normally applies it, per row, and it re-applies before
+    // the first photograph so this costs the tiled path nothing. But Gecko's
+    // one-shot path photographs the entire document without ever sending an
+    // FS_GOTO, so the policy was never applied there at all and "Hide
+    // completely" did nothing on Firefox. Doing it here covers any capture path
+    // that takes a picture without walking the page, including future ones.
+    applyFloatingPolicy(0, 1);
 
     setOverlayText('Capturing page');
     metrics.warnings = warnings;
@@ -736,8 +860,17 @@
   /**
    * Scroll the window so an inner pane is on screen.
    * Returns how much of the pane is actually visible, in CSS pixels.
+   *
+   * `overflowY` and `overflowX` are how far past the pane's own scroll limit
+   * the caller still needs to reach. A pane taller than the window cannot show
+   * its last screenful by scrolling the pane alone: once scrollTop is at its
+   * maximum, the bottom of the content sits at the bottom of the pane's box,
+   * which is off screen below. The remainder has to come from the WINDOW, by
+   * sliding the pane up until that part is in view, which is what a non-zero
+   * overflow asks for. It is zero for any pane that fits, so those behave
+   * exactly as before.
    */
-  function bringPaneIntoView() {
+  function bringPaneIntoView(overflowY = 0, overflowX = 0) {
     const usableH = session.usableHeightCss;
     const usableW = session.usableWidthCss;
     let box = paneBox();
@@ -746,8 +879,16 @@
 
     // Only move the page if the pane is off screen or awkwardly low; a pane
     // already comfortably in view should stay where the user had it.
-    if (box.top < 0 || box.top > usableH * 0.4) {
+    if (overflowY > 0) {
+      // Put the row the caller asked for at the top of the screen.
+      window.scrollBy(0, box.top + overflowY);
+      box = paneBox();
+    } else if (box.top < 0 || box.top > usableH * 0.4) {
       window.scrollBy(0, box.top - 8);
+      box = paneBox();
+    }
+    if (overflowX > 0) {
+      window.scrollBy(box.left + overflowX, 0);
       box = paneBox();
     }
     // Horizontally the page used to be left alone entirely, so a pane pushed
@@ -830,11 +971,20 @@
     applyFloatingPolicy(msg.rowIndex, msg.rowCount);
 
     if (session.mode === 'area') {
-      session.target.scrollTop = msg.y;
-      session.target.scrollLeft = msg.x;
+      const el = session.target;
+      // Ask for as much as the pane itself can give, then make up the shortfall
+      // by moving the window. A pane taller than the screen runs out of its own
+      // scroll before the last screenful of content has been shown, and asking
+      // for more than the maximum simply clamps: every tile past that point
+      // photographed the same rows, so the bottom of a tall pane was silently
+      // missing from the image.
+      const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
+      el.scrollTop = Math.min(msg.y, maxTop);
+      el.scrollLeft = Math.min(msg.x, maxLeft);
       await nextFrame();
-      bringPaneIntoView();
-    } else if (session.mode !== 'visible') {
+      bringPaneIntoView(msg.y - el.scrollTop, msg.x - el.scrollLeft);
+    } else if (session.mode !== 'visible' && !session.viewportAnchored) {
       // Targets arrive in output space, so shift them by the region origin.
       await scrollWindowTo(session.region.x + msg.x, session.region.y + msg.y);
     }

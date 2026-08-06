@@ -296,8 +296,16 @@
   // the cursor.
   canvas.addEventListener('pointercancel', endDrag);
 
+  /** The tools that turn a drag into a shape. Crop, text and move do not. */
+  const DRAW_TOOLS = new Set(['box', 'arrow', 'redact', 'pixelate']);
+
   function shapeFromDrag() {
     if (!drag) return null;
+    // Without this the shape's type is simply whatever tool is selected when the
+    // pointer comes up, which need not be the one the drag started with. A
+    // shape typed 'move' draws nothing, so it committed an invisible entry to
+    // the history and cleared the redo stack on its way past.
+    if (!DRAW_TOOLS.has(tool)) return null;
     const w = drag.current.x - drag.start.x;
     const h = drag.current.y - drag.start.y;
     // Ignore stray clicks that were not really a drag.
@@ -353,10 +361,15 @@
     // size, which is what this used to do, let a drag that started on the right
     // edge and continued past it produce a zero-width crop, and a canvas of
     // width zero throws the moment anything is drawn into it.
-    const left = Math.max(0, Math.round(Math.min(drag.start.x, drag.current.x)));
-    const top = Math.max(0, Math.round(Math.min(drag.start.y, drag.current.y)));
-    const right = Math.min(base.width, Math.round(Math.max(drag.start.x, drag.current.x)));
-    const bottom = Math.min(base.height, Math.round(Math.max(drag.start.y, drag.current.y)));
+    // Clamp to what is on screen NOW, not to the original image. A second crop
+    // was being clamped to the full bitmap, and because the pointer is captured
+    // the drag keeps reporting coordinates after it leaves the canvas, so
+    // dragging off the edge pulled already-cropped content back into view.
+    const c = cropRect();
+    const left = Math.max(c.x, Math.round(Math.min(drag.start.x, drag.current.x)));
+    const top = Math.max(c.y, Math.round(Math.min(drag.start.y, drag.current.y)));
+    const right = Math.min(c.x + c.w, Math.round(Math.max(drag.start.x, drag.current.x)));
+    const bottom = Math.min(c.y + c.h, Math.round(Math.max(drag.start.y, drag.current.y)));
 
     const w = right - left;
     const h = bottom - top;
@@ -381,7 +394,23 @@
   /* Text tool                                                         */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * Finishes the text box that is currently open, if there is one.
+   *
+   * There is only ONE input element, so opening a second box while the first is
+   * still live left both closures' listeners attached to it, each holding its
+   * own click point. A single Enter then ran both, committing the same string
+   * twice at two different places and pushing two entries onto the history.
+   * Ordinary blur does not save us here: startText calls preventDefault, which
+   * is what stops the opening click from immediately blurring the box, and that
+   * also means a later click on the canvas never blurs it either.
+   */
+  let closeOpenText = null;
+
   function startText(event) {
+    // Committing rather than discarding, to match what moving focus away does.
+    if (closeOpenText) closeOpenText();
+
     // Without this the browser moves focus on mouse-up, which immediately
     // blurs the input being opened here and commits an empty shape before the
     // user has typed a single character.
@@ -407,6 +436,7 @@
 
     const teardown = () => {
       finished = true;
+      closeOpenText = null;
       textInput.hidden = true;
       textInput.removeEventListener('blur', commit);
       textInput.removeEventListener('keydown', onKey);
@@ -439,6 +469,7 @@
       if (e.key === 'Escape') teardown();
     };
 
+    closeOpenText = commit;
     textInput.addEventListener('keydown', onKey);
     // Attach blur only after the current input sequence has settled, so the
     // focus churn from this very click cannot commit an empty shape.
@@ -620,6 +651,16 @@
   }
 
   function selectTool(next) {
+    // Changing tool mid-drag abandons the drag rather than handing it over.
+    // Escape is the reachable way in: it selects Move while the button is still
+    // down, and the pointerup that follows belonged to a rectangle the user has
+    // already given up on.
+    if (drag?.active) {
+      if (drag.pointerId != null && canvas.hasPointerCapture(drag.pointerId)) {
+        canvas.releasePointerCapture(drag.pointerId);
+      }
+      drag = null;
+    }
     tool = next;
     for (const button of document.querySelectorAll('.tool')) {
       button.classList.toggle('is-active', button.dataset.tool === next);
@@ -644,7 +685,23 @@
   /* Boot                                                              */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * The side panel only makes sense once there is an image.
+   *
+   * Every control in it reaches for `base`, so while the editor was showing
+   * "that screenshot is no longer available" the buttons underneath were still
+   * live: Save and Copy answered with a raw TypeError in place of a hint, and
+   * ticking Sharpen text threw with nothing shown at all. The coffee link is an
+   * anchor, so it is untouched by this.
+   */
+  function setPanelEnabled(on) {
+    for (const el of document.querySelectorAll('.panel button, .panel input, .panel select')) {
+      el.disabled = !on;
+    }
+  }
+
   async function boot() {
+    setPanelEnabled(false);
     const id = new URLSearchParams(location.search).get('id');
     if (!id) {
       $('#loading').textContent = 'No screenshot was requested.';
@@ -659,6 +716,7 @@
     }
 
     base = await createImageBitmap(record.blob);
+    setPanelEnabled(true);
     $('#loading').hidden = true;
     wrap.hidden = false;
 
@@ -743,6 +801,20 @@
   });
   $('#quality').addEventListener('input', () => {
     $('#quality-out').value = $('#quality').value;
+  });
+  // This slider is the ONLY place the JPEG quality can be set: the settings page
+  // has no control for it. Without writing the value back it was read on every
+  // export and never stored, so it sat on its default for ever and moving the
+  // slider was forgotten the moment the tab closed.
+  $('#quality').addEventListener('change', async () => {
+    try {
+      const { settings } = await api.storage.local.get('settings');
+      await api.storage.local.set({
+        settings: { ...(settings ?? {}), jpegQuality: Number($('#quality').value) },
+      });
+    } catch {
+      /* a preference that will not save is not worth interrupting an export for */
+    }
   });
 
   const SHORTCUTS = { v: 'move', c: 'crop', r: 'box', a: 'arrow', t: 'text', b: 'redact', p: 'pixelate' };

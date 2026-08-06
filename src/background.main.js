@@ -61,8 +61,27 @@ async function ensureAgent(tabId) {
   });
 }
 
-function tell(tabId, message) {
-  return FS.api.tabs.sendMessage(tabId, message);
+/**
+ * Ask the page something, and give up rather than wait for ever.
+ *
+ * FS_PREPARE, FS_GOTO and FS_BEFORE_SHOT all await an animation frame, and a
+ * minimised or fully occluded tab stops producing them. sendMessage does not
+ * time out on its own, so the reply simply never arrived: the capture hung, the
+ * one in-flight slot stayed taken, and every later capture was refused with "a
+ * capture is already running" until the worker happened to be recycled.
+ *
+ * Waiting for the frame is deliberately not skipped. The frame is the proof
+ * that the progress card is off screen, and photographing without it is how the
+ * card ended up in people's screenshots. Failing loudly is the right answer.
+ */
+function tell(tabId, message, timeoutMs = 30000) {
+  let timer;
+  return Promise.race([
+    FS.api.tabs.sendMessage(tabId, message),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('PAGE_UNRESPONSIVE')), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 /* ------------------------------------------------------------------ */
@@ -77,7 +96,7 @@ function tell(tabId, message) {
  * used to splice the new page into the middle of the old one, silently, and a
  * screenshot that is quietly wrong is worse than one that failed.
  */
-async function assertStillActive(tabId) {
+async function assertStillActive(tabId, windowId) {
   let tab;
   try {
     tab = await FS.api.tabs.get(tabId);
@@ -85,6 +104,12 @@ async function assertStillActive(tabId) {
     throw new Error('The tab being captured was closed.');
   }
   if (!tab.active) throw new Error('TAB_SWITCHED');
+  // `active` only means "frontmost in ITS window", and captureVisibleTab is
+  // pointed at a window id fixed when the capture started. Drag the tab out
+  // into a new window mid-capture and it is active there while the photographs
+  // keep coming from whatever is now frontmost in the window it left, so two
+  // different pages get stitched into one image.
+  if (windowId != null && tab.windowId !== windowId) throw new Error('TAB_SWITCHED');
 }
 
 /**
@@ -99,8 +124,8 @@ async function assertStillActive(tabId) {
  * The hide is deliberately not swallowed: photographing without knowing the
  * card is down is the exact failure being prevented.
  */
-async function shoot(tabId, scheduler, take) {
-  await assertStillActive(tabId);
+async function shoot(tabId, windowId, scheduler, take) {
+  await assertStillActive(tabId, windowId);
   const ready = await tell(tabId, { type: 'FS_BEFORE_SHOT' });
   if (!ready?.ok) throw new Error(ready?.error || 'Lost contact with the page.');
   try {
@@ -113,7 +138,7 @@ async function shoot(tabId, scheduler, take) {
 }
 
 async function captureViewport(tabId, windowId, scheduler) {
-  const dataUrl = await shoot(tabId, scheduler, () =>
+  const dataUrl = await shoot(tabId, windowId, scheduler, () =>
     FS.api.tabs.captureVisibleTab(windowId, { format: 'png' })
   );
   if (!dataUrl) throw new Error('The browser returned an empty capture.');
@@ -137,7 +162,7 @@ async function tryOneShot({ tabId, windowId, metrics, scale, scheduler }) {
   const wantH = Math.round(metrics.pageHeightCss * scale);
 
   try {
-    const dataUrl = await shoot(tabId, scheduler, () =>
+    const dataUrl = await shoot(tabId, windowId, scheduler, () =>
       FS.api.tabs.captureVisibleTab(windowId, {
         format: 'png',
         rect: {
@@ -289,6 +314,7 @@ async function stitchByScrolling({ tabId, mode, windowId, metrics, fit, ctx, sch
 
   const rowYs = [...new Set(tiles.map((t) => t.y))];
   let drawn = 0;
+  let heightChanged = false;
 
   for (let i = 0; i < tiles.length; i++) {
     const tile = tiles[i];
@@ -316,9 +342,15 @@ async function stitchByScrolling({ tabId, mode, windowId, metrics, fit, ctx, sch
       landed.pageHeightCss &&
       Math.abs(landed.pageHeightCss - metrics.pageHeightCss) > 4
     ) {
-      warnings.push(
-        'The page changed height while it was being captured, so part of the image may repeat or be missing. Pages that load more content as you scroll are hard to capture completely.'
-      );
+      // Once, however many times the page moves. A feed that grows on every
+      // scroll trips this on every tile, and thirty identical bullets in the
+      // editor say nothing the first one did not.
+      if (!heightChanged) {
+        heightChanged = true;
+        warnings.push(
+          'The page changed height while it was being captured, so part of the image may repeat or be missing. Pages that load more content as you scroll are hard to capture completely.'
+        );
+      }
       metrics.pageHeightCss = landed.pageHeightCss;
     }
 
@@ -464,6 +496,9 @@ function friendlyError(message) {
   if (/Cannot access|Missing host permission|Extension manifest/i.test(message)) {
     return 'Fullshot needs permission for this tab. Click the toolbar button on the page you want to capture.';
   }
+  if (message === 'PAGE_UNRESPONSIVE') {
+    return 'The page stopped responding, which usually means the window was minimised or hidden behind another one. Leave the tab on screen while the screenshot is taken.';
+  }
   if (/Receiving end does not exist|Could not establish connection/i.test(message)) {
     return 'The page reloaded during capture. Try again once it has finished loading.';
   }
@@ -475,7 +510,17 @@ function friendlyError(message) {
 
 FS.api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'FS_START') {
-    start(msg.mode).then(sendResponse);
+    start(msg.mode).then(async (result) => {
+      sendResponse(result);
+      // The element and panel pickers need a click on the page, and that click
+      // closes the popup, so by the time this resolves there is usually nothing
+      // left to receive the answer. Those two modes therefore failed in total
+      // silence. Leave the message where the next popup will find it.
+      if (!result?.ok && !result?.cancelled && (msg.mode === 'element' || msg.mode === 'area')) {
+        const [tab] = await FS.api.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+        await reportSilentFailure(tab?.id, result.error);
+      }
+    });
     return true; // async response
   }
   if (msg?.type === 'FS_PROGRESS_PING') {
@@ -485,10 +530,57 @@ FS.api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return false;
 });
 
-FS.api.commands?.onCommand.addListener((command) => {
-  if (command === 'capture-full-page') start('full');
-  if (command === 'capture-visible') start('visible');
+/**
+ * Report a failure that has nowhere to be displayed.
+ *
+ * A capture started from the keyboard has no popup listening, and the element
+ * and panel pickers close the popup the moment the user clicks the page, so
+ * their failures had no audience either. Both used to end in silence: the badge
+ * cleared and nothing else happened, which is indistinguishable from the
+ * shortcut not being bound at all.
+ *
+ * The badge carries the alarm and the message waits for the next popup, which
+ * is the only surface an extension without notifications has.
+ */
+async function reportSilentFailure(tabId, message) {
+  if (!message) return;
+  try {
+    await FS.api.storage.local.set({ lastError: { message, at: Date.now() } });
+  } catch {
+    /* storage is best effort here */
+  }
+  try {
+    await FS.api.action.setBadgeText({ tabId, text: '!' });
+    await FS.api.action.setBadgeBackgroundColor({ tabId, color: '#b91c1c' });
+  } catch {
+    /* badge is decorative */
+  }
+}
+
+FS.api.commands?.onCommand.addListener(async (command) => {
+  if (command !== 'capture-full-page' && command !== 'capture-visible') return;
+  const mode = command === 'capture-full-page' ? 'full' : 'visible';
+  const result = await start(mode);
+  if (!result?.ok && !result?.cancelled) {
+    const [tab] = await FS.api.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+    await reportSilentFailure(tab?.id, result?.error);
+  }
 });
+
+/**
+ * Bound the store by age even if the extension is never used again.
+ *
+ * prune() otherwise only ran off the back of a finished capture or an editor
+ * tab opening, so one screenshot taken and never looked at again sat in
+ * IndexedDB indefinitely, which is not what the privacy policy's one-day
+ * promise says. Both of these events are free: an alarm would need the
+ * `alarms` permission, and the permission set is the product.
+ */
+function pruneQuietly() {
+  FS.store.prune().catch(() => {});
+}
+FS.api.runtime.onStartup?.addListener(pruneQuietly);
+FS.api.runtime.onInstalled?.addListener(pruneQuietly);
 
 /**
  * Exposed so the end-to-end harness can drive a capture directly.

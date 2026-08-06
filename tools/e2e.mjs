@@ -285,7 +285,11 @@ async function run() {
     if (report.stickyBands === 1) pass('sticky header appears exactly once');
     else fail(`sticky header appears ${report.stickyBands} times, expected exactly 1`);
 
-    if (report.fixedBands <= 1) pass(`fixed footer appears ${report.fixedBands} time(s), not repeated`);
+    // Exactly one, not "at most one". Zero would mean the floating policy had
+    // hidden the footer on every row, which is a different bug the old bound
+    // reported as a pass.
+    if (report.fixedBands === 1) pass('fixed footer appears exactly once, not repeated');
+    else if (report.fixedBands === 0) fail('fixed footer is missing entirely: the policy hid it on every row');
     else fail(`fixed footer repeated ${report.fixedBands} times`);
 
     const badBlocks = report.blocks.filter((b) => !b.ok);

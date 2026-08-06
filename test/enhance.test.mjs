@@ -68,12 +68,43 @@ test('sharpen never touches the alpha channel', () => {
 });
 
 test('sharpen clamps instead of wrapping around', () => {
-  // An extreme edge at full strength would overshoot past 0 and 255.
+  // An extreme edge at full strength overshoots past 0 and 255. Asserting the
+  // result lands in 0..255 proves nothing, because the buffer is a
+  // Uint8ClampedArray and cannot hold anything else: the old assertion here
+  // passed just as happily on a sharpen that wrapped 260 round to 4.
+  //
+  // So compute the same convolution in plain numbers and check that the
+  // overshoot really did happen and really was clamped rather than wrapped.
   const img = image(7, 7, (x) => (x < 3 ? [0, 0, 0] : [255, 255, 255]));
+  const before = Float64Array.from(img.data);
   FS.enhance.sharpen(img, 3);
-  for (let i = 0; i < img.data.length; i++) {
-    assert.ok(img.data[i] >= 0 && img.data[i] <= 255, 'value escaped the byte range');
+
+  // The same 3x3 Laplacian the filter uses:  0 -a 0 / -a 1+4a -a / 0 -a 0.
+  // Borders are deliberately left untouched, so only the interior is checked.
+  const amount = 3;
+  const at = (cx, cy) => before[(cy * 7 + cx) * 4];
+  let sawOvershoot = false;
+  let sawUndershoot = false;
+
+  for (let y = 1; y < 6; y++) {
+    for (let x = 1; x < 6; x++) {
+      const raw =
+        (1 + 4 * amount) * at(x, y) -
+        amount * (at(x - 1, y) + at(x + 1, y) + at(x, y - 1) + at(x, y + 1));
+      const got = img.data[(y * 7 + x) * 4];
+      if (raw > 255) {
+        sawOvershoot = true;
+        assert.equal(got, 255, `overshoot at ${x},${y} (raw ${raw}) wrapped instead of clamping`);
+      } else if (raw < 0) {
+        sawUndershoot = true;
+        assert.equal(got, 0, `undershoot at ${x},${y} (raw ${raw}) wrapped instead of clamping`);
+      } else {
+        assert.equal(got, Math.round(raw), `interior pixel ${x},${y} is not the kernel's result`);
+      }
+    }
   }
+  assert.ok(sawOvershoot, 'the fixture never overshot 255, so this test proves nothing');
+  assert.ok(sawUndershoot, 'the fixture never undershot 0, so this test proves nothing');
 });
 
 test('sharpen is a no-op on an image too small to convolve', () => {

@@ -1,5 +1,88 @@
 # Changelog
 
+## 1.1.0
+
+A bug sweep. Most of what follows is the same shape of fault: a capture that
+came back the right size, looking entirely plausible, showing the wrong thing.
+
+- Picking an element pinned to the window, a cookie banner, a docked footer, a
+  chat widget, gave a picture of the page behind it instead. A fixed element has
+  no position in the document, but its on-screen rectangle was being treated as
+  one, so the page was scrolled to a row the element was not on. The element did
+  not move, because that is what fixed means, and whatever was now at that spot
+  was photographed instead.
+- A page laid out right to left came out with its columns in the wrong order.
+  Such a page scrolls from a negative offset up to zero rather than from zero
+  upwards, so tiling from zero asked for positions that do not exist and every
+  column after the first landed in the same place.
+- A scrolling panel taller than the window lost the bottom of its content. Once
+  the panel has been scrolled as far as it goes, the end of the content is
+  sitting below the bottom of the screen, and no further scrolling of the panel
+  can bring it up. The window is now moved to fetch the rest.
+- Dragging the tab into another window mid-capture spliced two different pages
+  into one image. The guard checked that the tab was still frontmost, which
+  stays true in its new window, but the photographs kept coming from the window
+  it had left.
+- On Firefox, the sticky headers and floating bars setting did nothing at all.
+  Firefox can photograph a whole page in one shot, and that path never ran the
+  step that applies the setting. "Hide completely" hid nothing.
+- Exporting as PDF could produce a file some readers reject. A long page title
+  was cut to length after its parentheses had been escaped, which can slice an
+  escape in half and leave a stray backslash that swallows the rest of the
+  document information.
+- Captures on an ordinary desktop warned that the page was larger than the
+  browser's maximum image size when it was nothing of the sort. The scale is
+  rounded down to a hundredth so the canvas cannot come out over budget, and
+  that rounding was being reported as though a limit had been hit. A Windows
+  display at 150% with the browser at 75% was enough to trigger it.
+
+Things that got stuck rather than got it wrong:
+
+- A page with its own click handler could leave the element picker running for
+  ever, and every capture after that was refused with "a capture is already
+  running". The picker now gives up.
+- The same thing happened whenever the window was minimised or completely
+  covered: the page stops drawing frames, and the extension was waiting for one
+  that would never come. It now says so instead.
+- Starting a capture while a previous one was still live took the page over
+  without handing it back first, stranding the old progress card and stylesheet
+  on it. A browser is free to shut the extension down mid-capture, so this was
+  ordinary rather than exotic.
+
+Failures that happened in silence now say something:
+
+- Captures started with the keyboard reported nothing whatsoever when they
+  failed. Neither did the element and panel pickers, because clicking the page
+  to choose a target closes the popup that was waiting for the answer. Both now
+  raise a red badge and leave the reason for the next time the popup opens.
+- The page-height warning was added once per section, so a page that keeps
+  loading as you scroll filled the editor with the same sentence thirty times.
+
+In the editor:
+
+- Pressing Escape mid-drag committed an invisible shape and threw away the redo
+  history, because the shape took its type from whichever tool was selected when
+  the button came up rather than when it went down.
+- Cropping a second time could bring back content the first crop had removed.
+- Opening a second text box before finishing the first committed the same words
+  twice, in two places.
+- The JPEG quality slider never saved, so it reset every time.
+- Save, Copy and Sharpen text were clickable on a screenshot that had expired,
+  and answered with a raw error message.
+
+Elsewhere:
+
+- The privacy policy said a screenshot is deleted as soon as the editor loads
+  it. That stopped being true when the editor started keeping it, so that
+  reloading the tab does not throw the picture away. The policy now describes
+  what actually happens, and the one-day limit it falls back on is now enforced
+  when the browser starts, rather than only when Fullshot happens to run again.
+- The release gate could not fail its own version check, ignored optional
+  permissions entirely, and wrote the store zips before deciding whether the
+  build was acceptable.
+- Fullshot is free and stays free, so there is now a quiet Buy Me a Coffee link
+  at the bottom of the editor panel and in settings. No image is fetched for it.
+
 ## 1.0.4
 
 - Fullshot's own progress card could end up in the screenshot, sitting in the

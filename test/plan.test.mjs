@@ -67,6 +67,27 @@ test('fitToBudget leaves the scale alone when the image fits', () => {
   assert.equal(fit.heightPx, 6000);
 });
 
+test('fitToBudget does not call rounding a downscale', () => {
+  // The scale is rounded down to a hundredth so the canvas is never a fraction
+  // over budget. A device pixel ratio with more than two decimals therefore
+  // always changes the number, and reporting that as a downscale puts a
+  // "this page is larger than your browser's maximum image size" warning on an
+  // ordinary page. 1.125 is Windows at 150% with the browser at 75%, and 1.375
+  // is 125% with the browser at 110%: both are unremarkable desktops.
+  for (const dpr of [1.005, 1.125, 1.375, 2.1875, 2.625]) {
+    const fit = FS.plan.fitToBudget({
+      pageWidthCss: 1280,
+      pageHeightCss: 4000,
+      scale: dpr,
+      // Deliberately enormous, so nothing but the rounding can move the scale.
+      maxArea: 1073741824,
+      maxDimension: 65535,
+    });
+    assert.deepEqual(fit.reasons, [], `dpr ${dpr} should hit no budget limit`);
+    assert.equal(fit.downscaled, false, `dpr ${dpr} reported a downscale it did not make`);
+  }
+});
+
 test('fitToBudget scales down to respect the area limit', () => {
   // A big square page: total area binds long before either single axis does.
   const maxArea = 268435456;

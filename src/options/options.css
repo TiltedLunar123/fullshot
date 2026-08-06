@@ -146,6 +146,16 @@ kbd {
   font-size: 13px;
 }
 
+.note a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.note a:hover,
+.note a:focus-visible {
+  text-decoration: underline;
+}
+
 footer {
   display: flex;
   align-items: center;

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Fullshot - Full Page Screenshot",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "One-click full page screenshots that get sticky headers, lazy images and app UIs right. Free editor and PDF export. No account.",
   "permissions": ["activeTab", "scripting", "storage"],
   "action": {

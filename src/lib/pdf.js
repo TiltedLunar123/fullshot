@@ -141,11 +141,21 @@ function fmt(n) {
 
 /** Literal strings are parenthesised, so those and backslashes need escaping. */
 function escapeText(text) {
-  return String(text)
-    .replace(/\\/g, '\\\\')
-    .replace(/\(/g, '\\(')
-    .replace(/\)/g, '\\)')
-    // Keep it to printable ASCII; anything else would need a UTF-16 string.
-    .replace(/[^\x20-\x7e]/g, '')
-    .slice(0, 200);
+  return (
+    String(text)
+      // Keep it to printable ASCII; anything else would need a UTF-16 string.
+      .replace(/[^\x20-\x7e]/g, '')
+      // Cut to length BEFORE escaping, never after.
+      //
+      // Escaping first and slicing afterwards can cut a two-character escape in
+      // half. The backslash left behind then escapes the closing parenthesis of
+      // the string itself, so /Title never terminates and swallows the rest of
+      // the information dictionary. A page whose title is long and contains a
+      // parenthesis, which is ordinary, produced a PDF that strict readers
+      // reject.
+      .slice(0, 200)
+      .replace(/\\/g, '\\\\')
+      .replace(/\(/g, '\\(')
+      .replace(/\)/g, '\\)')
+  );
 }
