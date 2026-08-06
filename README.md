@@ -131,8 +131,13 @@ all twenty blocks landed at the correct offset.
 `npm run e2e:modes` verifies the other three capture modes: that a visible-area
 capture is viewport sized and not stretched onto a page-sized canvas, that an
 element captured from the middle of a page contains that element and nothing
-else, and that a scrolling panel is scrolled and stitched across its full content
-with all thirty rows landing at the right height.
+else, that picking an element pinned to the window returns that element rather
+than the page behind it, and that a scrolling panel is scrolled and stitched
+across its full content. It runs the panel case twice, once on a pane smaller
+than the window and once on a pane taller than it, because a pane taller than
+the window runs out of its own scroll before the last screenful has been shown.
+It also captures a page three times wider than the viewport, laid out both left
+to right and right to left, which is what covers the multi-column tile grid.
 
 `npm run e2e:scroll` captures a page that fights back: it hijacks the wheel, undoes
 programmatic scrolls and moves itself while it is being read.
@@ -176,6 +181,11 @@ one source.
 
 `PLAN.md` documents the architecture, the platform facts each decision rests on, and
 which of those were verified against primary documentation rather than assumed.
+
+## Support
+
+Fullshot is free, has no paid tier and collects nothing. If it saved you some
+time, you can [buy me a coffee](https://buymeacoffee.com/judeh1l).
 
 ## Licence
 
