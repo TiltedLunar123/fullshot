@@ -169,6 +169,25 @@ test('title is escaped so parentheses cannot break the string', () => {
   assert.ok(text.includes('/Title (Report \\(draft\\) \\\\ v2)'), 'title escaping is wrong');
 });
 
+test('a long title is cut before it is escaped, never through an escape', () => {
+  // Escaping first and truncating afterwards can slice a two-character escape
+  // in half. The leftover backslash then escapes the closing parenthesis of the
+  // string itself, so /Title never terminates and swallows the rest of the
+  // dictionary. One character of padding in front of the parentheses is what
+  // moves the cut onto an odd boundary.
+  const title = `A${'('.repeat(150)}`;
+  const pdf = FS.pdf.build([page()], { pageWidthPt: 612, pageHeightPt: 792, title });
+  const text = decode(pdf);
+
+  const info = /\/Title \((.*)\) \/Producer/.exec(text);
+  assert.ok(info, '/Title did not terminate before /Producer');
+
+  // Count the backslashes running back from the end: an odd number means the
+  // last one is escaping the delimiter rather than being escaped itself.
+  const trailing = /\\*$/.exec(info[1])[0].length;
+  assert.equal(trailing % 2, 0, 'title ends on a dangling escape');
+});
+
 test('rejects an empty page list rather than emitting an invalid file', () => {
   assert.throws(() => FS.pdf.build([], { pageWidthPt: 612, pageHeightPt: 792 }));
 });
