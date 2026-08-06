@@ -138,6 +138,22 @@ async function buildTarget(target, base, background) {
 async function check(base) {
   const problems = [];
 
+  // The version a release is named after comes from package.json (npm scripts,
+  // the zip filenames) while the version a store actually sees comes from the
+  // manifest. Comparing each built manifest against the base manifest, which is
+  // what this used to do, compares a value with the clone it was copied from and
+  // can never fail. The drift that does happen is bumping one file and not the
+  // other, and it shipped as a version the changelog does not describe.
+  const pkg = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf8'));
+  if (pkg.version !== base.version) {
+    problems.push(`package.json is ${pkg.version} but the manifest is ${base.version}`);
+  }
+
+  const changelog = await fs.readFile(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
+  if (!new RegExp(`^##\\s*\\[?${base.version.replace(/\./g, '\\.')}\\]?`, 'm').test(changelog)) {
+    problems.push(`CHANGELOG.md has no entry for ${base.version}`);
+  }
+
   for (const target of TARGETS) {
     const dir = path.join(DIST, target);
     const manifest = JSON.parse(await fs.readFile(path.join(dir, 'manifest.json'), 'utf8'));
@@ -400,6 +416,12 @@ async function main() {
     console.log(`built ${target} -> ${path.relative(ROOT, out)}`);
   }
 
+  // The gate runs BEFORE the zips are written, not after. `--zip --check` used
+  // to package first, so a failing gate still left uploadable artefacts on disk,
+  // having already overwritten the previous good ones. A rejected build must not
+  // produce something that can be dragged into a store console by mistake.
+  if (args.has('--check')) await check(base);
+
   if (args.has('--zip')) {
     await fs.mkdir(path.join(ROOT, 'release'), { recursive: true });
     for (const target of TARGETS) {
@@ -408,8 +430,6 @@ async function main() {
       console.log(`zipped ${target} (${n} files) -> ${path.relative(ROOT, zip)}`);
     }
   }
-
-  if (args.has('--check')) await check(base);
 }
 
 main().catch((err) => {
