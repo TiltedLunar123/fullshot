@@ -833,8 +833,17 @@
   /**
    * Scroll the window so an inner pane is on screen.
    * Returns how much of the pane is actually visible, in CSS pixels.
+   *
+   * `overflowY` and `overflowX` are how far past the pane's own scroll limit
+   * the caller still needs to reach. A pane taller than the window cannot show
+   * its last screenful by scrolling the pane alone: once scrollTop is at its
+   * maximum, the bottom of the content sits at the bottom of the pane's box,
+   * which is off screen below. The remainder has to come from the WINDOW, by
+   * sliding the pane up until that part is in view, which is what a non-zero
+   * overflow asks for. It is zero for any pane that fits, so those behave
+   * exactly as before.
    */
-  function bringPaneIntoView() {
+  function bringPaneIntoView(overflowY = 0, overflowX = 0) {
     const usableH = session.usableHeightCss;
     const usableW = session.usableWidthCss;
     let box = paneBox();
@@ -843,8 +852,16 @@
 
     // Only move the page if the pane is off screen or awkwardly low; a pane
     // already comfortably in view should stay where the user had it.
-    if (box.top < 0 || box.top > usableH * 0.4) {
+    if (overflowY > 0) {
+      // Put the row the caller asked for at the top of the screen.
+      window.scrollBy(0, box.top + overflowY);
+      box = paneBox();
+    } else if (box.top < 0 || box.top > usableH * 0.4) {
       window.scrollBy(0, box.top - 8);
+      box = paneBox();
+    }
+    if (overflowX > 0) {
+      window.scrollBy(box.left + overflowX, 0);
       box = paneBox();
     }
     // Horizontally the page used to be left alone entirely, so a pane pushed
@@ -927,10 +944,19 @@
     applyFloatingPolicy(msg.rowIndex, msg.rowCount);
 
     if (session.mode === 'area') {
-      session.target.scrollTop = msg.y;
-      session.target.scrollLeft = msg.x;
+      const el = session.target;
+      // Ask for as much as the pane itself can give, then make up the shortfall
+      // by moving the window. A pane taller than the screen runs out of its own
+      // scroll before the last screenful of content has been shown, and asking
+      // for more than the maximum simply clamps: every tile past that point
+      // photographed the same rows, so the bottom of a tall pane was silently
+      // missing from the image.
+      const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
+      el.scrollTop = Math.min(msg.y, maxTop);
+      el.scrollLeft = Math.min(msg.x, maxLeft);
       await nextFrame();
-      bringPaneIntoView();
+      bringPaneIntoView(msg.y - el.scrollTop, msg.x - el.scrollLeft);
     } else if (session.mode !== 'visible' && !session.viewportAnchored) {
       // Targets arrive in output space, so shift them by the region origin.
       await scrollWindowTo(session.region.x + msg.x, session.region.y + msg.y);

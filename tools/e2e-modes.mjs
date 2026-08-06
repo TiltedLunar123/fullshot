@@ -450,6 +450,54 @@ async function run() {
 
       if (aShot.warnings?.length) console.log(`area warnings: ${aShot.warnings.join(' | ')}`);
     }
+
+    /* ---- area, pane TALLER than the window ------------------------ */
+    // The pane above is smaller than the viewport, so its own scrollTop can
+    // reach every row. A pane taller than the window cannot: once scrollTop is
+    // at its maximum the last screenful of content is sitting at the bottom of
+    // the pane's box, off screen below, and asking for more simply clamps. Runs
+    // last, and on its own page, so it cannot disturb anything above.
+    await cdp.send('Page.navigate', { url: `http://127.0.0.1:${fixturePort}/tall-pane.html` }, page);
+    await waitFor('tall pane fixture', async () => cdp.evaluate(page, `window.__tallPane ?? null`));
+    const tall = await cdp.evaluate(page, `window.__tallPane`);
+    console.log(`tall pane: client ${tall.clientHeight}, scrollHeight ${tall.scrollHeight}, rows ${tall.rows}`);
+    await scrollTo(0);
+
+    const tallExpr = `(() => {
+      const el = document.getElementById('pane');
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left + 20), y: Math.round(r.top + 20) };
+    })()`;
+
+    const { result: tallArea } = await captureWithPick('area', tallExpr);
+    if (!tallArea?.ok) {
+      fail(`Tall panel capture failed: ${tallArea?.error ?? (tallArea?.cancelled ? 'picker cancelled' : 'unknown')}`);
+    } else {
+      const tShot = await cdp.evaluate(control, INSPECT(tallArea.id));
+      const expTH = Math.round(tall.scrollHeight * geometry.dpr);
+      console.log(`tall area: ${tShot.width}x${tShot.height}, expected height ~${expTH}`);
+
+      const tallRows = [];
+      for (let i = 0; i < tall.rows; i++) {
+        const y = (i * tall.rowHeight + tall.rowHeight / 2) * geometry.dpr;
+        if (y >= tShot.height) {
+          tallRows.push({ i, missing: true });
+          continue;
+        }
+        const [r, g, b] = await cdp.evaluate(control, SAMPLE(8, y));
+        tallRows.push({ i, r, g, b, ok: r === i * 8 && g === 90 && b === 160 });
+      }
+      const badTall = tallRows.filter((s) => !s.ok);
+      check(
+        badTall.length === 0,
+        `Every row of a pane taller than the window was captured (${tall.rows} rows, pane box ${tall.clientHeight}px)`,
+        `${badTall.length} row(s) of the tall pane wrong: ` +
+          badTall
+            .slice(0, 6)
+            .map((s) => (s.missing ? `#${s.i} missing` : `#${s.i} rgb(${s.r},${s.g},${s.b}) want rgb(${s.i * 8},90,160)`))
+            .join(', ')
+      );
+    }
   } finally {
     fixtureServer.close();
     await shutdown(session);

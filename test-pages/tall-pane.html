@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tall scrolling pane</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 40px 24px;
+        font: 15px/1.4 system-ui, sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+      }
+      h1 {
+        margin: 0 0 16px;
+        font-size: 18px;
+      }
+      /*
+        The point of this fixture: the pane's own box is TALLER than the
+        viewport the harness runs at (1280x900, so roughly 770 usable CSS px).
+        Scrolling the pane alone therefore runs out before its last screenful of
+        content has been shown, because once scrollTop is at its maximum the
+        bottom of the content sits at the bottom of the pane's box, off screen
+        below. Reaching it needs the window to move as well.
+      */
+      #pane {
+        width: 720px;
+        height: 1100px;
+        overflow-y: auto;
+        border: 6px solid #f43f5e;
+        background: #fff;
+      }
+      .row {
+        height: 100px;
+        padding-left: 14px;
+        font: 600 20px/100px system-ui, sans-serif;
+        color: #fff;
+      }
+      /* A tail long enough that the page can scroll far enough to bring the
+         bottom of the pane into view. */
+      .tail {
+        height: 1600px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Tall scrolling pane</h1>
+    <div id="pane"></div>
+    <div class="tail"></div>
+
+    <script>
+      const ROWS = 30;
+      const ROW_HEIGHT = 100;
+      const pane = document.getElementById('pane');
+
+      for (let i = 0; i < ROWS; i++) {
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.dataset.index = String(i);
+        // Row index encoded in the red channel, exactly like the torture
+        // fixture, so a sampled pixel identifies which row it came from.
+        row.style.background = `rgb(${i * 8}, 90, 160)`;
+        row.textContent = `Row ${i}`;
+        pane.append(row);
+      }
+
+      window.__tallPane = {
+        rows: ROWS,
+        rowHeight: ROW_HEIGHT,
+        clientHeight: pane.clientHeight,
+        scrollHeight: pane.scrollHeight,
+      };
+    </script>
+  </body>
+</html>
