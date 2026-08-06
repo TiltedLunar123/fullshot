@@ -55,6 +55,28 @@
     );
   }
 
+  /**
+   * The leftmost scroll offset this document can actually reach.
+   *
+   * A page laid out right to left scrolls from a NEGATIVE offset up to zero,
+   * rather than from zero up to a positive one. Tiling from zero rightwards
+   * therefore asks for positions that do not exist: every column past the first
+   * clamps to the same place, and the stitch comes back with the page's columns
+   * in the wrong order.
+   *
+   * Probed rather than read off `dir`, because what matters is the scroll range
+   * the engine actually offers, and an inner element or a writing-mode can put
+   * the origin somewhere `dir` does not describe.
+   */
+  function leftmostScrollX() {
+    if (docWidth() <= window.innerWidth + 1) return 0;
+    const had = window.scrollX;
+    window.scrollTo(-1e7, window.scrollY);
+    const leftmost = Math.min(0, window.scrollX);
+    window.scrollTo(had, window.scrollY);
+    return leftmost;
+  }
+
   function measure() {
     return {
       pageWidthCss: docWidth(),
@@ -754,7 +776,12 @@
         warnings.push('That panel does not scroll, so it was captured as it appears.');
       }
     } else {
-      region = { x: 0, y: 0, w: metrics.pageWidthCss, h: metrics.pageHeightCss };
+      region = {
+        x: leftmostScrollX(),
+        y: 0,
+        w: metrics.pageWidthCss,
+        h: metrics.pageHeightCss,
+      };
     }
 
     session.region = region;

@@ -498,6 +498,59 @@ async function run() {
             .join(', ')
       );
     }
+    /* ---- wide pages, left to right and right to left -------------- */
+    // Nothing else in test-pages is wider than the viewport, so the multi-column
+    // tile grid and the horizontal scroll read-back had no coverage at all. The
+    // right-to-left run is the interesting one: such a page scrolls from a
+    // negative offset up to zero, not from zero up to a positive one.
+    for (const rtl of [false, true]) {
+      const label = rtl ? 'right to left' : 'left to right';
+      await cdp.send(
+        'Page.navigate',
+        { url: `http://127.0.0.1:${fixturePort}/wide-page.html${rtl ? '?rtl=1' : ''}` },
+        page
+      );
+      await waitFor(`wide fixture (${label})`, async () => cdp.evaluate(page, `window.__widePage ?? null`));
+      const wide = await cdp.evaluate(page, `window.__widePage`);
+      console.log(`wide page (${label}): ${wide.pageWidth}px across a ${wide.clientWidth}px viewport`);
+
+      const capture = await cdp.evaluate(sw, `FS.startCapture('full', ${tabId})`);
+      if (!capture?.ok) {
+        fail(`Wide ${label} capture failed: ${capture?.error ?? 'unknown'}`);
+        continue;
+      }
+      const wShot = await cdp.evaluate(control, INSPECT(capture.id));
+      console.log(`wide ${label}: ${wShot.width}x${wShot.height}, expected width ~${Math.round(wide.pageWidth * geometry.dpr)}`);
+
+      // Sample the middle of every column, a quarter of the way down. Not
+      // halfway: each column's label is a single line centred vertically, so
+      // the midpoint lands on white glyphs rather than on the column's colour.
+      const sampleY = Math.floor(wShot.height * 0.25);
+      const cols = [];
+      for (let i = 0; i < wide.columns; i++) {
+        const x = (i * wide.columnWidth + wide.columnWidth / 2) * geometry.dpr;
+        if (x >= wShot.width) {
+          cols.push({ i, missing: true });
+          continue;
+        }
+        // A screenshot has to look like the page. The columns are flex items, so
+        // laying the page out right to left puts column 0 at the RIGHT: the
+        // correct image is the mirrored order, not the source order.
+        const want = (rtl ? wide.columns - 1 - i : i) * 8;
+        const [r, g, b] = await cdp.evaluate(control, SAMPLE(x, sampleY));
+        cols.push({ i, want, r, g, b, ok: r === want && g === 120 && b === 60 });
+      }
+      const badCols = cols.filter((c) => !c.ok);
+      check(
+        badCols.length === 0,
+        `Every column of a ${label} page wider than the viewport was captured (${wide.columns} columns)`,
+        `${badCols.length} column(s) wrong on the ${label} page: ` +
+          badCols
+            .slice(0, 6)
+            .map((c) => (c.missing ? `#${c.i} missing` : `#${c.i} rgb(${c.r},${c.g},${c.b}) want rgb(${c.want},120,60)`))
+            .join(', ')
+      );
+    }
   } finally {
     fixtureServer.close();
     await shutdown(session);

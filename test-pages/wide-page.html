@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Wide page</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font: 15px/1.4 system-ui, sans-serif;
+        background: #ffffff;
+      }
+      #strip {
+        display: flex;
+        height: 900px;
+      }
+      .col {
+        flex: none;
+        width: 100px;
+        height: 100%;
+        font: 600 13px/900px system-ui, sans-serif;
+        color: #fff;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="strip"></div>
+
+    <script>
+      /*
+        Wider than the harness viewport, so the capture has to tile ACROSS as
+        well as down. Nothing else in test-pages does, which is why the
+        multi-column grid and the horizontal scroll read-back had no coverage.
+
+        `?rtl=1` lays the same content out right to left. That matters because a
+        right-to-left page scrolls from a negative offset up to zero rather than
+        from zero up to a positive one, so tiling from zero rightwards asks for
+        positions that do not exist.
+      */
+      const COLUMNS = 30;
+      const COLUMN_WIDTH = 100;
+      const rtl = new URLSearchParams(location.search).get('rtl') === '1';
+      if (rtl) document.documentElement.setAttribute('dir', 'rtl');
+
+      const strip = document.getElementById('strip');
+      for (let i = 0; i < COLUMNS; i++) {
+        const col = document.createElement('div');
+        col.className = 'col';
+        col.dataset.index = String(i);
+        // Column index in the red channel, so a sampled pixel says which column
+        // it came from and therefore whether the stitch put it in the right
+        // place.
+        col.style.background = `rgb(${i * 8}, 120, 60)`;
+        col.textContent = String(i);
+        strip.append(col);
+      }
+
+      window.__widePage = {
+        columns: COLUMNS,
+        columnWidth: COLUMN_WIDTH,
+        rtl,
+        pageWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      };
+    </script>
+  </body>
+</html>
