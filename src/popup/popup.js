@@ -113,16 +113,22 @@ document.getElementById('options').addEventListener('click', () => {
 })();
 
 // Surface a restricted page before the user clicks and gets a confusing error.
+//
+// The rules come from lib/browser.js rather than from a second copy kept here,
+// which is how the two lists came to disagree: the popup's never mentioned
+// file:// at all, so a local file looked capturable right up until the moment
+// the background refused it.
 (async () => {
   try {
     const [tab] = await api.tabs.query({ active: true, currentWindow: true });
     const url = tab?.url ?? '';
-    const blocked =
-      /^(chrome|edge|about|devtools|view-source|moz-extension|chrome-extension):/i.test(url) ||
-      /^https:\/\/(chromewebstore\.google\.com|chrome\.google\.com\/webstore|addons\.mozilla\.org)/i.test(url);
-    if (blocked) {
+    // No address means activeTab has not been granted yet, not that the page is
+    // restricted. Saying nothing is the honest answer.
+    if (!url) return;
+    const restriction = FS.restrictionFor(url, FS.isFileUrl(url) && (await FS.canAccessFiles()));
+    if (restriction) {
       setBusy(true);
-      say('Browsers block screenshots of this page. Open an ordinary web page and try again.', true);
+      say(restriction, true);
     }
   } catch {
     /* activeTab may not be granted until a click; silence is correct here */
