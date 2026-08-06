@@ -296,8 +296,16 @@
   // the cursor.
   canvas.addEventListener('pointercancel', endDrag);
 
+  /** The tools that turn a drag into a shape. Crop, text and move do not. */
+  const DRAW_TOOLS = new Set(['box', 'arrow', 'redact', 'pixelate']);
+
   function shapeFromDrag() {
     if (!drag) return null;
+    // Without this the shape's type is simply whatever tool is selected when the
+    // pointer comes up, which need not be the one the drag started with. A
+    // shape typed 'move' draws nothing, so it committed an invisible entry to
+    // the history and cleared the redo stack on its way past.
+    if (!DRAW_TOOLS.has(tool)) return null;
     const w = drag.current.x - drag.start.x;
     const h = drag.current.y - drag.start.y;
     // Ignore stray clicks that were not really a drag.
@@ -353,10 +361,15 @@
     // size, which is what this used to do, let a drag that started on the right
     // edge and continued past it produce a zero-width crop, and a canvas of
     // width zero throws the moment anything is drawn into it.
-    const left = Math.max(0, Math.round(Math.min(drag.start.x, drag.current.x)));
-    const top = Math.max(0, Math.round(Math.min(drag.start.y, drag.current.y)));
-    const right = Math.min(base.width, Math.round(Math.max(drag.start.x, drag.current.x)));
-    const bottom = Math.min(base.height, Math.round(Math.max(drag.start.y, drag.current.y)));
+    // Clamp to what is on screen NOW, not to the original image. A second crop
+    // was being clamped to the full bitmap, and because the pointer is captured
+    // the drag keeps reporting coordinates after it leaves the canvas, so
+    // dragging off the edge pulled already-cropped content back into view.
+    const c = cropRect();
+    const left = Math.max(c.x, Math.round(Math.min(drag.start.x, drag.current.x)));
+    const top = Math.max(c.y, Math.round(Math.min(drag.start.y, drag.current.y)));
+    const right = Math.min(c.x + c.w, Math.round(Math.max(drag.start.x, drag.current.x)));
+    const bottom = Math.min(c.y + c.h, Math.round(Math.max(drag.start.y, drag.current.y)));
 
     const w = right - left;
     const h = bottom - top;
@@ -620,6 +633,16 @@
   }
 
   function selectTool(next) {
+    // Changing tool mid-drag abandons the drag rather than handing it over.
+    // Escape is the reachable way in: it selects Move while the button is still
+    // down, and the pointerup that follows belonged to a rectangle the user has
+    // already given up on.
+    if (drag?.active) {
+      if (drag.pointerId != null && canvas.hasPointerCapture(drag.pointerId)) {
+        canvas.releasePointerCapture(drag.pointerId);
+      }
+      drag = null;
+    }
     tool = next;
     for (const button of document.querySelectorAll('.tool')) {
       button.classList.toggle('is-active', button.dataset.tool === next);
