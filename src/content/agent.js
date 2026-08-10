@@ -485,6 +485,70 @@
   }
 
   /**
+   * The part of an element the page actually paints, in viewport coordinates.
+   *
+   * An ancestor that clips shows only a window onto its contents; the rest of
+   * the element's box is drawn nowhere. Capturing the box as measured is how a
+   * tall element inside a mail or chat pane came back as a picture of the page
+   * BEHIND the pane: every row past the panel's edge was photographed from the
+   * document at coordinates the element only nominally occupies, so the result
+   * was the right size, looked plausible, and showed the wrong thing.
+   *
+   * Being off screen is not clipping. An element taller than the window is
+   * captured by scrolling to it, which is the whole point of the mode.
+   *
+   * Only in-flow elements are clipped here, and the walk stops at the first
+   * positioned ancestor. Beyond that point whether an overflow actually clips
+   * depends on the containing-block chain, and cropping content that really is
+   * on screen would be a worse bug than the one being fixed.
+   *
+   * Returns null when nothing of the element is showing.
+   */
+  function paintedRect(el) {
+    const r = el.getBoundingClientRect();
+    let box = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+
+    let cs;
+    try {
+      cs = getComputedStyle(el);
+    } catch {
+      return box;
+    }
+    if (cs.position === 'absolute' || cs.position === 'fixed') return box;
+
+    for (let n = el.parentElement; n && n.nodeType === 1; n = n.parentElement) {
+      let ncs;
+      try {
+        ncs = getComputedStyle(n);
+      } catch {
+        break;
+      }
+      const clipsX = ncs.overflowX !== 'visible';
+      const clipsY = ncs.overflowY !== 'visible';
+      // An element with no padding box of its own cannot clip anything. An
+      // inline element reports an overflow it does not apply, which is the
+      // case this skips.
+      if ((clipsX || clipsY) && (n.clientWidth > 0 || n.clientHeight > 0)) {
+        const inner = paddingBoxOf(n);
+        if (clipsX) {
+          box.left = Math.max(box.left, inner.left);
+          box.right = Math.min(box.right, inner.left + inner.width);
+        }
+        if (clipsY) {
+          box.top = Math.max(box.top, inner.top);
+          box.bottom = Math.min(box.bottom, inner.top + inner.height);
+        }
+      }
+      if (ncs.position === 'absolute' || ncs.position === 'fixed') break;
+    }
+
+    if (box.right - box.left < 1 || box.bottom - box.top < 1) return null;
+    box.width = box.right - box.left;
+    box.height = box.bottom - box.top;
+    return box;
+  }
+
+  /**
    * Let the user point at what they want.
    *
    * `kind: 'area'` resolves to the nearest scrolling ancestor, which is how the
@@ -690,19 +754,34 @@
     } else if (mode === 'element') {
       // An element inside its own scrolling ancestor cannot be reached by
       // scrolling the window, so ask the browser to bring it into view first.
-      const clipper = nearestScrollable(session.target.parentElement);
-      if (clipper) {
+      if (nearestScrollable(session.target.parentElement)) {
         session.target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
         await nextFrame();
-        warnings.push(
-          'That element sits inside its own scrolling panel. Only the part that fits in the panel could be captured, so try the scrolling panel mode for the whole thing.'
-        );
       }
 
       // The element's box in DOCUMENT coordinates. Measured now, after
       // priming, because loading images can move things.
-      const rect = session.target.getBoundingClientRect();
       session.viewportAnchored = isViewportAnchored(session.target);
+      const full = session.target.getBoundingClientRect();
+      // Only the part an ancestor actually lets through. The warning below
+      // used to be the whole of the handling: it said only the part in the
+      // panel could be captured while the capture went on walking the
+      // element's full height down the document, photographing whatever
+      // happened to be at those coordinates.
+      const rect = session.viewportAnchored ? full : paintedRect(session.target);
+      if (!rect) {
+        restore();
+        return {
+          ok: false,
+          error:
+            'That element is completely hidden by the panel it sits in, so there is nothing to capture. Scroll it into view and try again.',
+        };
+      }
+      if (rect.height < full.height - 1 || rect.width < full.width - 1) {
+        warnings.push(
+          'That element is larger than the panel it sits in, so only the part showing through the panel was captured. Scrolling panel mode captures the whole of a pane.'
+        );
+      }
 
       if (session.viewportAnchored) {
         // Anchored to the window, so it is only ever as large as the part of it
@@ -836,8 +915,7 @@
    * as the origin of scrolled content shifts every slice by the border width
    * and paints the border itself into the output.
    */
-  function paneBox() {
-    const el = session.target;
+  function paddingBoxOf(el) {
     const rect = el.getBoundingClientRect();
     let borderLeft = 0;
     let borderTop = 0;
@@ -855,6 +933,10 @@
       width: Math.max(1, el.clientWidth),
       height: Math.max(1, el.clientHeight),
     };
+  }
+
+  function paneBox() {
+    return paddingBoxOf(session.target);
   }
 
   /**

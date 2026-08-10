@@ -663,7 +663,12 @@
     }
     tool = next;
     for (const button of document.querySelectorAll('.tool')) {
-      button.classList.toggle('is-active', button.dataset.tool === next);
+      const active = button.dataset.tool === next;
+      button.classList.toggle('is-active', active);
+      // A class is a colour. Which tool is selected has to be readable without
+      // seeing the colour, and this toolbar is the whole of the editor's
+      // navigation.
+      button.setAttribute('aria-pressed', String(active));
     }
     $('.crop-bar').hidden = next !== 'crop';
     if (next !== 'crop') {
@@ -702,6 +707,11 @@
 
   async function boot() {
     setPanelEnabled(false);
+    // Undo and Redo live in the header rather than the panel, so they are not
+    // covered by the line above. Nothing set their disabled state until a
+    // screenshot had loaded, which left them looking usable on a page that is
+    // only ever going to say the capture has expired.
+    updateHistoryButtons();
     const id = new URLSearchParams(location.search).get('id');
     if (!id) {
       $('#loading').textContent = 'No screenshot was requested.';

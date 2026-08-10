@@ -20,6 +20,26 @@ function setBusy(busy) {
   for (const b of buttons) b.disabled = busy;
 }
 
+/**
+ * Take the alarm badge down.
+ *
+ * It is set against a SPECIFIC tab, and a per-tab badge overrides the default
+ * one, so clearing the default left the "!" exactly where it was. A capture
+ * that failed from the keyboard therefore flagged the toolbar icon red until
+ * some later capture on the same tab happened to overwrite it: the user read
+ * the message here, closed the popup, and the alarm went on claiming something
+ * was wrong with a message that no longer existed anywhere.
+ */
+async function clearAlarmBadge() {
+  try {
+    const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id != null) await api.action.setBadgeText({ tabId: tab.id, text: '' });
+    await api.action.setBadgeText({ text: '' });
+  } catch {
+    /* the badge is decorative; never let it break a capture */
+  }
+}
+
 /** Show the "open it" button for a capture nothing has displayed yet. */
 function offerCapture(id) {
   openCapture.hidden = false;
@@ -36,7 +56,7 @@ async function start(mode) {
   setBusy(true);
   // The alarm badge belongs to the failure the user is now looking at, so a new
   // attempt clears it.
-  api.action?.setBadgeText({ text: '' }).catch(() => {});
+  await clearAlarmBadge();
   say(mode === 'element' || mode === 'area' ? 'Click what you want to capture...' : 'Working...');
 
   try {
@@ -85,6 +105,10 @@ document.getElementById('options').addEventListener('click', () => {
     const { lastError } = await api.storage.local.get('lastError');
     await api.storage.local.remove('lastError');
     if (!lastError?.message) return;
+    // Either way the badge has done its job: the message is either on screen
+    // now or too old to be worth showing, and in both cases it has just been
+    // taken out of storage, so nothing will ever display it again.
+    await clearAlarmBadge();
     // Anything older than a few minutes belongs to a session the user has
     // stopped thinking about, and repeating it now would just be confusing.
     if (Date.now() - (lastError.at ?? 0) > 5 * 60 * 1000) return;
@@ -109,6 +133,59 @@ document.getElementById('options').addEventListener('click', () => {
     offerCapture(pendingCapture.id);
   } catch {
     /* nothing to offer is the normal case */
+  }
+})();
+
+// Show the shortcut the browser ACTUALLY bound, not the one asked for.
+//
+// A manifest only ever SUGGESTS a key. The browser silently drops a suggestion
+// it reserves for itself or that another extension already holds, and the user
+// is free to rebind or clear it from the browser's own shortcuts page. None of
+// that reached the popup, which printed the suggestion regardless, so the two
+// modes that advertise a shortcut could be advertising a key that does nothing.
+const COMMAND_FOR_MODE = { full: 'capture-full-page', visible: 'capture-visible' };
+
+(async () => {
+  try {
+    const commands = await new Promise((resolve) => {
+      // Ask with no arguments FIRST. Gecko's `browser.*` is promise only and
+      // refuses an argument it has no parameter for, so handing it a callback
+      // would throw and leave Firefox with the old, possibly untrue, keys. Both
+      // engines answer with a promise here; the callback form is kept only as a
+      // fallback for a build that does not.
+      let returned = null;
+      try {
+        returned = api.commands.getAll();
+      } catch {
+        /* not the promise flavour; try the callback below */
+      }
+      if (returned && typeof returned.then === 'function') {
+        returned.then(resolve, () => resolve([]));
+        return;
+      }
+      try {
+        api.commands.getAll(resolve);
+      } catch {
+        resolve([]);
+      }
+    });
+
+    const bound = new Map((commands ?? []).map((c) => [c.name, c.shortcut]));
+    for (const button of buttons) {
+      const kbd = button.querySelector('kbd');
+      if (!kbd) continue;
+      const shortcut = bound.get(COMMAND_FOR_MODE[button.dataset.mode]);
+      if (shortcut) {
+        kbd.textContent = shortcut;
+        continue;
+      }
+      // Nothing is bound, so the key printed here would be a lie. Say where one
+      // can be set rather than leaving the user to wonder why nothing happens.
+      kbd.remove();
+      button.title = "No keyboard shortcut is set for this. Your browser's extension shortcuts page can set one.";
+    }
+  } catch {
+    /* leave the suggested keys in place; they are the best guess available */
   }
 })();
 

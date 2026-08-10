@@ -1,6 +1,6 @@
 {
   "name": "fullshot",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Full page screenshot extension for Chrome and Firefox. Correct on sticky headers, lazy images and app UIs.",
   "private": true,
   "type": "module",
@@ -15,7 +15,8 @@
     "e2e:scroll": "node tools/e2e-scroll.mjs",
     "e2e:overlay": "node tools/e2e-overlay.mjs",
     "zip": "node tools/build.mjs --zip",
-    "all": "node tools/build.mjs --zip --check && node --test test/*.test.mjs"
+    "all": "node tools/build.mjs --zip --check && node --test test/*.test.mjs",
+    "e2e:popup": "node tools/e2e-popup.mjs"
   },
   "license": "MIT"
 }

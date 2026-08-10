@@ -34,6 +34,9 @@
         background: #fff;
       }
       .row {
+        /* Narrower than the wrapper on purpose, so there is a strip of #rows
+           itself for the element picker to land on. */
+        width: 600px;
         height: 100px;
         padding-left: 14px;
         font: 600 20px/100px system-ui, sans-serif;
@@ -48,13 +51,23 @@
   </head>
   <body>
     <h1>Tall scrolling pane</h1>
-    <div id="pane"></div>
+    <div id="pane">
+      <!--
+        The rows live in a wrapper so that element mode has something to pick
+        that is FAR taller than the panel showing it. The wrapper's box is
+        3000px; the panel only ever lets 1088px of it through, and the rest of
+        the wrapper's height covers page background that is nothing to do with
+        it.
+      -->
+      <div id="rows"></div>
+    </div>
     <div class="tail"></div>
 
     <script>
       const ROWS = 30;
       const ROW_HEIGHT = 100;
       const pane = document.getElementById('pane');
+      const rows = document.getElementById('rows');
 
       for (let i = 0; i < ROWS; i++) {
         const row = document.createElement('div');
@@ -64,7 +77,7 @@
         // fixture, so a sampled pixel identifies which row it came from.
         row.style.background = `rgb(${i * 8}, 90, 160)`;
         row.textContent = `Row ${i}`;
-        pane.append(row);
+        rows.append(row);
       }
 
       window.__tallPane = {
@@ -72,6 +85,7 @@
         rowHeight: ROW_HEIGHT,
         clientHeight: pane.clientHeight,
         scrollHeight: pane.scrollHeight,
+        wrapperHeight: rows.getBoundingClientRect().height,
       };
     </script>
   </body>

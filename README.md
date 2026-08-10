@@ -91,7 +91,7 @@ and anything older than a day is discarded.
 ## Install
 
 On the [Chrome Web Store](https://chromewebstore.google.com/detail/fullshot-full-page-screen/fbhdnoklfeahhmmdmiblndcjmeagjfci).
-The Firefox build is submitted to addons.mozilla.org and awaiting review.
+For Firefox, on [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/fullshot-full-page-screenshot/).
 
 To run it from source:
 
@@ -118,7 +118,7 @@ npm run all        # build, zip, gate and tests
 npm run icons      # re-rasterise the icon PNGs (only after editing icon.svg)
 ```
 
-There are five end-to-end harnesses, all driving a real browser with no test
+There are six end-to-end harnesses, all driving a real browser with no test
 framework.
 
 `npm run e2e` loads the built extension, captures `test-pages/torture.html`, and
@@ -137,7 +137,9 @@ across its full content. It runs the panel case twice, once on a pane smaller
 than the window and once on a pane taller than it, because a pane taller than
 the window runs out of its own scroll before the last screenful has been shown.
 It also captures a page three times wider than the viewport, laid out both left
-to right and right to left, which is what covers the multi-column tile grid.
+to right and right to left, which is what covers the multi-column tile grid, and an
+element far taller than the panel showing it, which is the case where capturing the
+element's whole box photographs the page behind the panel instead.
 
 `npm run e2e:scroll` captures a page that fights back: it hijacks the wheel, undoes
 programmatic scrolls and moves itself while it is being read.
@@ -148,6 +150,14 @@ whether the card is still up, then checks that a flat-coloured page comes back
 containing nothing but that colour. Asking the page is the point: a path that takes a
 photograph and later discards it still leaks on the browser where that photograph is
 kept, so a pixel check alone would call a broken build clean.
+
+`npm run e2e:popup` covers the two things the popup does that cannot be seen from
+inside it. A capture started from the keyboard has no popup to fail in front of, so
+the background flags the toolbar button and parks the message for the next popup to
+read; the check confirms the message is shown and that the flag comes off the tab it
+was set on. It also confirms the keyboard shortcut the popup advertises is the one the
+browser really bound, and runs a second build whose commands are declared but bound to
+nothing, which is what a refused or cleared key looks like.
 
 `npm run e2e:tools` drives every editor tool with real synthesised mouse and keyboard
 input and asserts on the resulting canvas: that Move changes nothing, that Box draws a
