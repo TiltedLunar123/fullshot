@@ -498,6 +498,81 @@ async function run() {
             .join(', ')
       );
     }
+
+    /* ---- element mode INSIDE a scrolling panel --------------------- */
+    // The wrapper holding the rows is 3000px tall and the panel only ever
+    // shows 1088px of it. The rest of that box is drawn nowhere, so capturing
+    // it as measured walked the document past the panel and photographed the
+    // page background as though it were the element: right size, wrong
+    // picture. Runs on the same fixture, which is already loaded.
+    await cdp.evaluate(page, `document.getElementById('pane').scrollTop = 0; true`);
+    await scrollTo(0);
+
+    const rowsExpr = `(() => {
+      const pane = document.getElementById('pane');
+      const rows = document.getElementById('rows');
+      const pr = pane.getBoundingClientRect();
+      const rr = rows.getBoundingClientRect();
+      return {
+        x: Math.round(rr.right - 30),
+        y: Math.round(pr.top + 60),
+        wrapperHeight: Math.round(rr.height),
+        paneClientHeight: pane.clientHeight,
+      };
+    })()`;
+
+    const { result: inPane, point: rowsPoint } = await captureWithPick('element', rowsExpr);
+    if (!inPane?.ok) {
+      fail(`Element inside a panel failed: ${inPane?.error ?? (inPane?.cancelled ? 'picker cancelled' : 'unknown')}`);
+    } else {
+      const pShot = await cdp.evaluate(control, INSPECT(inPane.id));
+      const expectVisible = Math.round(rowsPoint.paneClientHeight * geometry.dpr);
+      const wholeBox = Math.round(rowsPoint.wrapperHeight * geometry.dpr);
+      console.log(
+        `element in panel: ${pShot.width}x${pShot.height}, panel shows ${expectVisible}px of a ${wholeBox}px element`
+      );
+
+      check(
+        Math.abs(pShot.height - expectVisible) <= 12,
+        `An element taller than its panel was captured at the height the panel shows (${pShot.height}px, not the element's full ${wholeBox}px)`,
+        `Element in a panel is ${pShot.height}px, expected ~${expectVisible}px (its whole box is ${wholeBox}px)`
+      );
+
+      // Size alone is not proof. Every row the panel shows has to be present,
+      // in order, with no page background stitched in behind it.
+      const visibleRows = Math.floor(rowsPoint.paneClientHeight / tall.rowHeight);
+      const paneRows = [];
+      for (let i = 0; i < visibleRows; i++) {
+        const y = (i * tall.rowHeight + tall.rowHeight / 2) * geometry.dpr;
+        if (y >= pShot.height) {
+          paneRows.push({ i, missing: true });
+          continue;
+        }
+        const [r, g, b] = await cdp.evaluate(control, SAMPLE(8, y));
+        paneRows.push({ i, r, g, b, ok: r === i * 8 && g === 90 && b === 160 });
+      }
+      // The bottom of the image is where the old behaviour showed itself: past
+      // the panel's edge there is nothing but the page's own dark background,
+      // and it was being stitched in as though it were part of the element.
+      const [br, bg, bb] = await cdp.evaluate(control, SAMPLE(8, pShot.height - 4));
+      check(
+        bg === 90 && bb === 160,
+        `The last row of the element capture is panel content, not the page behind it (rgb ${br},${bg},${bb})`,
+        `The bottom of the element capture is rgb(${br},${bg},${bb}), which is not a panel row`
+      );
+
+      const badPaneRows = paneRows.filter((s) => !s.ok);
+      check(
+        badPaneRows.length === 0,
+        `Every row the panel shows is in the element capture, with no page behind it (${visibleRows} rows)`,
+        `${badPaneRows.length} row(s) wrong in the panelled element capture: ` +
+          badPaneRows
+            .slice(0, 6)
+            .map((s) => (s.missing ? `#${s.i} missing` : `#${s.i} rgb(${s.r},${s.g},${s.b}) want rgb(${s.i * 8},90,160)`))
+            .join(', ')
+      );
+    }
+
     /* ---- wide pages, left to right and right to left -------------- */
     // Nothing else in test-pages is wider than the viewport, so the multi-column
     // tile grid and the horizontal scroll read-back had no coverage at all. The

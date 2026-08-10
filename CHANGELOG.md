@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.2.0
+
+Includes 1.1.1 below, which was never published.
+
+- Picking an element that sits inside a scrolling panel, a message in a mail
+  thread or a card in a chat window, gave a picture that was part element and
+  part something else entirely. A panel only shows a window onto its contents,
+  and the rest of the element is not drawn anywhere on the page. The capture
+  went on walking the element's full height down the document regardless and
+  photographed whatever happened to be at those coordinates, which on a long
+  element was mostly the page behind the panel. It now captures the part the
+  panel actually shows, and says so.
+- A screenshot that failed while nothing was on screen to say so, one started
+  from the keyboard, left a red mark on the toolbar button. Opening the popup
+  showed the message and deleted it, but the mark stayed, so from then on the
+  button claimed something had gone wrong and there was nothing left anywhere
+  to explain what. It was being cleared for the browser as a whole while it had
+  been set against one tab, and a mark set on a tab wins.
+- A capture that failed before it had properly started left the popup saying
+  "Working..." for as long as it was open, with no error and nothing happening.
+- The popup listed keyboard shortcuts it had no way of knowing were real. A
+  browser only takes the suggested key if it is free, another extension can
+  already hold it, and you can change or clear it yourself, none of which the
+  popup could see. It now shows the key the browser actually bound, and says
+  where to set one when there is none.
+- The line at the bottom of the editor's panel, the one about nothing being
+  uploaded anywhere, could not be seen without scrolling the panel: on a
+  smaller screen the export controls fill it on their own. The panel's contents
+  scroll on their own now and that line stays put.
+- Undo and Redo looked available on a screenshot that had expired, and did
+  nothing when pressed.
+- Running out of memory while writing the finished image kept the whole thing
+  in memory afterwards, on exactly the captures where that costs most.
+- Screen readers now get told which editing tool is selected, and read out what
+  the editor says after saving or copying. Both were colour and position only.
+- The settings page kept its own copy of every default rather than reading the
+  real ones. They agreed, but only by luck, and that is how the popup's private
+  copy of the blocked-page list came to be missing local files in 1.1.0.
+
 ## 1.1.1
 
 - Local files could not be captured at all, even with file access already

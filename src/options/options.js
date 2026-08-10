@@ -1,25 +1,13 @@
 /**
  * Settings page. Every control writes through immediately, so there is no Save
  * button to forget.
+ *
+ * The defaults come from lib/settings.js rather than from a second copy kept
+ * here. That copy was in step by luck rather than design, and it is exactly how
+ * the popup's private list of restricted URLs came to disagree with the real
+ * one: whichever file gets edited, the other goes on answering the old value.
  */
 (() => {
-  const api = typeof browser !== 'undefined' && browser.runtime ? browser : chrome;
-
-  const DEFAULTS = {
-    floatingPolicy: 'once',
-    settleMs: 120,
-    imageWaitMs: 1500,
-    primeLazyContent: true,
-    freezeMotion: true,
-    format: 'png',
-    jpegQuality: 92,
-    filenameTemplate: '{title} - {date}',
-    retina: true,
-    enhanceText: false,
-    enhanceLevel: 'medium',
-    openEditor: true,
-  };
-
   const CHECKBOXES = ['primeLazyContent', 'freezeMotion', 'retina', 'enhanceText', 'openEditor'];
   const SELECTS = ['floatingPolicy', 'format', 'enhanceLevel'];
   const TEXTS = ['filenameTemplate'];
@@ -35,8 +23,7 @@
   }
 
   async function load() {
-    const stored = (await api.storage.local.get('settings')).settings ?? {};
-    const settings = { ...DEFAULTS, ...stored };
+    const settings = await FS.settings.get();
 
     for (const key of CHECKBOXES) $(key).checked = Boolean(settings[key]);
     for (const key of [...SELECTS, ...TEXTS]) $(key).value = settings[key];
@@ -47,8 +34,7 @@
   }
 
   async function write(key, value) {
-    const stored = (await api.storage.local.get('settings')).settings ?? {};
-    await api.storage.local.set({ settings: { ...DEFAULTS, ...stored, [key]: value } });
+    await FS.settings.set({ [key]: value });
     flashSaved();
   }
 
@@ -59,7 +45,7 @@
     $(key).addEventListener('change', (e) => write(key, e.target.value));
   }
   for (const key of TEXTS) {
-    $(key).addEventListener('change', (e) => write(key, e.target.value.trim() || DEFAULTS[key]));
+    $(key).addEventListener('change', (e) => write(key, e.target.value.trim() || FS.DEFAULTS[key]));
   }
   for (const key of RANGES) {
     $(key).addEventListener('input', (e) => {
@@ -69,7 +55,7 @@
   }
 
   $('reset').addEventListener('click', async () => {
-    await api.storage.local.remove('settings');
+    await FS.settings.reset();
     await load();
     flashSaved();
   });

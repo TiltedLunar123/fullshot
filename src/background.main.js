@@ -284,9 +284,17 @@ async function runCapture({ tabId, windowId, mode, settings }) {
     await tell(tabId, { type: 'FS_RESTORE' }).catch(() => {});
   }
 
-  const blob = await canvas.convertToBlob({ type: 'image/png' });
-  // Free the backing store now; a full-page canvas can be hundreds of MB.
-  releaseCanvas(canvas);
+  // Encoding is the last thing that can fail, and it fails on exactly the
+  // captures where holding the canvas costs most: the encoder is out of memory
+  // because the canvas is enormous. Letting it escape without releasing left
+  // hundreds of megabytes pinned until the worker was recycled.
+  let blob;
+  try {
+    blob = await canvas.convertToBlob({ type: 'image/png' });
+  } finally {
+    // Free the backing store now; a full-page canvas can be hundreds of MB.
+    releaseCanvas(canvas);
+  }
 
   return {
     blob,
@@ -422,31 +430,42 @@ async function setBadge(tabId, text) {
  *   considers active.
  */
 async function start(mode, explicitTabId) {
-  const tab =
-    explicitTabId != null
-      ? await FS.api.tabs.get(explicitTabId)
-      : (await FS.api.tabs.query({ active: true, currentWindow: true }))[0];
-  if (!tab) return { ok: false, error: 'No active tab.' };
-
-  // Only ask the browser about file access when the answer can change the
-  // outcome. It is a round trip, and no ordinary page has any use for it.
-  const fileAccess = FS.isFileUrl(tab.url) && (await FS.canAccessFiles());
-  const restriction = FS.restrictionFor(tab.url, fileAccess);
-  if (restriction) return { ok: false, error: restriction };
-
-  if (inFlightTabId !== null) {
-    return {
-      ok: false,
-      error:
-        inFlightTabId === tab.id
-          ? 'A capture is already running on this tab.'
-          : 'A capture is already running on another tab. Screenshots have to be taken one at a time.',
-    };
-  }
-  inFlightTabId = tab.id;
-  await setBadge(tab.id, '...');
+  // Everything is inside the try, including working out which tab this is.
+  //
+  // Those first few calls used to sit outside it, so anything they threw came
+  // straight back out of start() as a rejected promise. The message listener
+  // has already answered `true` by then, promising a reply that now never
+  // arrives: the popup sits on "Working..." for as long as it is open, with no
+  // error, and the worker logs an unhandled rejection nobody sees.
+  let tab = null;
+  let claimed = false;
 
   try {
+    tab =
+      explicitTabId != null
+        ? await FS.api.tabs.get(explicitTabId)
+        : (await FS.api.tabs.query({ active: true, currentWindow: true }))[0];
+    if (!tab) return { ok: false, error: 'No active tab.' };
+
+    // Only ask the browser about file access when the answer can change the
+    // outcome. It is a round trip, and no ordinary page has any use for it.
+    const fileAccess = FS.isFileUrl(tab.url) && (await FS.canAccessFiles());
+    const restriction = FS.restrictionFor(tab.url, fileAccess);
+    if (restriction) return { ok: false, error: restriction };
+
+    if (inFlightTabId !== null) {
+      return {
+        ok: false,
+        error:
+          inFlightTabId === tab.id
+            ? 'A capture is already running on this tab.'
+            : 'A capture is already running on another tab. Screenshots have to be taken one at a time.',
+      };
+    }
+    inFlightTabId = tab.id;
+    claimed = true;
+    await setBadge(tab.id, '...');
+
     const settings = await FS.settings.get();
     const result = await runCapture({
       tabId: tab.id,
@@ -487,8 +506,13 @@ async function start(mode, explicitTabId) {
     if (message === 'CANCELLED') return { ok: false, cancelled: true };
     return { ok: false, error: friendlyError(message) };
   } finally {
-    inFlightTabId = null;
-    await setBadge(tab.id, '');
+    // Only if this call is the one that took the slot. The early returns above
+    // include "a capture is already running", and releasing another capture's
+    // slot from here would let a second one start on top of it.
+    if (claimed) {
+      inFlightTabId = null;
+      await setBadge(tab.id, '');
+    }
   }
 }
 
@@ -513,17 +537,22 @@ function friendlyError(message) {
 
 FS.api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'FS_START') {
-    start(msg.mode).then(async (result) => {
-      sendResponse(result);
-      // The element and panel pickers need a click on the page, and that click
-      // closes the popup, so by the time this resolves there is usually nothing
-      // left to receive the answer. Those two modes therefore failed in total
-      // silence. Leave the message where the next popup will find it.
-      if (!result?.ok && !result?.cancelled && (msg.mode === 'element' || msg.mode === 'area')) {
-        const [tab] = await FS.api.tabs.query({ active: true, currentWindow: true }).catch(() => []);
-        await reportSilentFailure(tab?.id, result.error);
-      }
-    });
+    // A listener that has answered `true` owes a reply. Anything unforeseen
+    // between here and sendResponse leaves the popup waiting for one that
+    // never comes, so the catch answers rather than letting it fall through.
+    start(msg.mode)
+      .catch((err) => ({ ok: false, error: friendlyError(String(err?.message ?? err)) }))
+      .then(async (result) => {
+        sendResponse(result);
+        // The element and panel pickers need a click on the page, and that
+        // click closes the popup, so by the time this resolves there is usually
+        // nothing left to receive the answer. Those two modes therefore failed
+        // in total silence. Leave the message where the next popup will find it.
+        if (!result?.ok && !result?.cancelled && (msg.mode === 'element' || msg.mode === 'area')) {
+          const [tab] = await FS.api.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+          await reportSilentFailure(tab?.id, result.error);
+        }
+      });
     return true; // async response
   }
   if (msg?.type === 'FS_PROGRESS_PING') {
@@ -563,7 +592,12 @@ async function reportSilentFailure(tabId, message) {
 FS.api.commands?.onCommand.addListener(async (command) => {
   if (command !== 'capture-full-page' && command !== 'capture-visible') return;
   const mode = command === 'capture-full-page' ? 'full' : 'visible';
-  const result = await start(mode);
+  // A shortcut has no popup listening, so an error thrown here would be seen
+  // by nobody at all. Turn it into the badge and the parked message instead.
+  const result = await start(mode).catch((err) => ({
+    ok: false,
+    error: friendlyError(String(err?.message ?? err)),
+  }));
   if (!result?.ok && !result?.cancelled) {
     const [tab] = await FS.api.tabs.query({ active: true, currentWindow: true }).catch(() => []);
     await reportSilentFailure(tab?.id, result?.error);
