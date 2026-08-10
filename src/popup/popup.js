@@ -148,10 +148,26 @@ const COMMAND_FOR_MODE = { full: 'capture-full-page', visible: 'capture-visible'
 (async () => {
   try {
     const commands = await new Promise((resolve) => {
-      // Callback flavoured on Chromium, promise flavoured on Gecko. Read both;
-      // whichever answers first wins and resolve() ignores the other.
-      const returned = api.commands.getAll(resolve);
-      if (returned && typeof returned.then === 'function') returned.then(resolve, () => resolve([]));
+      // Ask with no arguments FIRST. Gecko's `browser.*` is promise only and
+      // refuses an argument it has no parameter for, so handing it a callback
+      // would throw and leave Firefox with the old, possibly untrue, keys. Both
+      // engines answer with a promise here; the callback form is kept only as a
+      // fallback for a build that does not.
+      let returned = null;
+      try {
+        returned = api.commands.getAll();
+      } catch {
+        /* not the promise flavour; try the callback below */
+      }
+      if (returned && typeof returned.then === 'function') {
+        returned.then(resolve, () => resolve([]));
+        return;
+      }
+      try {
+        api.commands.getAll(resolve);
+      } catch {
+        resolve([]);
+      }
     });
 
     const bound = new Map((commands ?? []).map((c) => [c.name, c.shortcut]));
