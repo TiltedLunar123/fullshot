@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.1.1
+
+- Local files could not be captured at all, even with file access already
+  switched on for Fullshot. The check refused every file:// address on sight
+  instead of asking the browser whether access had been granted, so ticking
+  "Allow access to file URLs" achieved nothing and the message telling you to
+  tick it never went away. It now asks, and a local file captures like any
+  other page.
+- On Firefox that message was wrong in a second way. Firefox has no such
+  setting: reaching local files there needs access to every file on your
+  computer, which Fullshot does not ask for and will not. It now says that,
+  rather than sending people to hunt for a switch their browser does not have.
+- The popup kept a second, separate list of pages it cannot capture, and the
+  two had drifted: local files were missing from the popup's copy entirely.
+  Both now come from one place.
+
 ## 1.1.0
 
 A bug sweep. Most of what follows is the same shape of fault: a capture that
