@@ -24,6 +24,8 @@ to its natural place in the document, so it shows up where it belongs. A
 `position: fixed` bar is classified by the edge it is docked to and drawn only on the
 first or last screen. No repeated navs, no cookie banner tiled down the page.
 
+![The same page captured twice. On the left, with sticky handling off, the site's nav bar is stamped three times down the image, once per slice. On the right, the Fullshot default, it appears once at the top and the rest of the page is uninterrupted.](store/assets/screenshot-2.png)
+
 **Images are loaded before anything is captured.** The page is swept top to bottom
 first so `IntersectionObserver` fires and lazy images decode, then fonts and images
 are awaited under a timeout. No blank bands.
@@ -67,6 +69,8 @@ Crop, black out, pixelate, arrows, boxes and text, with undo and redo. Export PN
 JPEG, WebP or a paginated PDF, or copy straight to the clipboard. None of it is behind
 a paywall, because there is no paid tier.
 
+![The editor: a toolbar with move, crop, box, arrow, text, redact and blur tools above the captured page, and a right-hand panel showing the screenshot size, a sharpen text option with a strength dropdown, format and quality controls, paper size, file name, and save and copy to clipboard buttons. A line at the bottom reads that nothing here is uploaded anywhere.](docs/editor.png)
+
 ## Permissions
 
 ```json
@@ -96,14 +100,14 @@ For Firefox, on [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/fu
 To run it from source:
 
 **Chrome or Edge**: go to `chrome://extensions`, turn on Developer mode, choose
-"Load unpacked", and select `dist/chrome`.
+"Load unpacked", and choose `dist/chrome`.
 
 **Firefox**: go to `about:debugging#/runtime/this-firefox`, choose "Load Temporary
-Add-on", and select `dist/firefox/manifest.json`.
+Add-on", and choose `dist/firefox/manifest.json`.
 
-Firefox 140 or newer is required. Tab capture only started accepting `activeTab` in
+Firefox 140 or newer is needed. Tab capture only started accepting `activeTab` in
 126, and Fullshot will not ask for the `<all_urls>` that older versions demanded; 140
-is where Firefox's required data collection declaration became supported.
+is where Firefox's needed data collection declaration became supported.
 
 ## Build
 
@@ -122,13 +126,13 @@ There are six end-to-end harnesses, all driving a real browser with no test
 framework.
 
 `npm run e2e` loads the built extension, captures `test-pages/torture.html`, and
-verifies the result pixel by pixel. The fixture encodes each block's index in its own
+checks the result pixel by pixel. The fixture encodes each block's index in its own
 red channel, so a misplaced, duplicated or dropped slice shows up as the wrong colour
 at a known height instead of a screenshot that merely looks plausible. It checks that
 the sticky header appears exactly once, that the fixed footer is not repeated, and that
 all twenty blocks landed at the correct offset.
 
-`npm run e2e:modes` verifies the other three capture modes: that a visible-area
+`npm run e2e:modes` checks the other three capture modes: that a visible-area
 capture is viewport sized and not stretched onto a page-sized canvas, that an
 element captured from the middle of a page contains that element and nothing
 else, that picking an element pinned to the window returns that element rather
@@ -145,7 +149,7 @@ element's whole box photographs the page behind the panel instead.
 programmatic scrolls and moves itself while it is being read.
 
 `npm run e2e:overlay` proves Fullshot never photographs its own progress card. It
-wraps the capture API and asks the page, at the instant of every single photograph,
+wraps the capture API and asks the page, at the instant of every photograph,
 whether the card is still up, then checks that a flat-coloured page comes back
 containing nothing but that colour. Asking the page is the point: a path that takes a
 photograph and later discards it still leaks on the browser where that photograph is
@@ -190,7 +194,7 @@ Chrome-only `offscreen` API is not needed. `tools/build.mjs` emits both manifest
 one source.
 
 `PLAN.md` documents the architecture, the platform facts each decision rests on, and
-which of those were verified against primary documentation rather than assumed.
+which of those were checked against primary documentation rather than assumed.
 
 ## Support
 
